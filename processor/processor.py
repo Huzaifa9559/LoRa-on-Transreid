@@ -82,6 +82,7 @@ def do_train(
     epochs = cfg.SOLVER.MAX_EPOCHS
 
     logger = logging.getLogger("transreid.train")
+    logger.info(f"Device resolved to: {device}")
     logger.info("start training")
 
     # Device / DDP handling
@@ -132,6 +133,10 @@ def do_train(
             target = vid.to(device)
             target_cam = target_cam.to(device)
             target_view = target_view.to(device)
+            
+            # Debug: check if data is on GPU
+            if n_iter == 0:
+                logger.info(f"Image device: {img.device}, Target device: {target.device}")
 
             # Forward + loss (AMP if available)
             with amp_ctx_factory():

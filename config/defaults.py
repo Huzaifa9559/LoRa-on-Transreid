@@ -90,6 +90,8 @@ _C.LORA.MERGE_AT_EVAL = False
 _C.LORA.BIAS = "none"
 # Save only LoRA adapter weights (not full model)
 _C.LORA.SAVE_ADAPTER_ONLY = True
+# List of transformer blocks to apply LoRA to (e.g., [6, 7, 8, 9, 10, 11]). If empty, apply to all blocks.
+_C.LORA.BLOCKS = []
 
 # -----------------------------------------------------------------------------
 # INPUT

@@ -133,13 +133,36 @@ def inject_lora_into_vit(
     dropout: float,
     targets: List[str],
     bias_mode: str = "none",
-    #include_blocks=list(range(6, 12)),
+    include_blocks: Optional[List[int]] = None,
 ):
     """
     Wrap matching nn.Linear modules with LoRALinear and return list of replaced names.
+    
+    Args:
+        model: The model to inject LoRA into
+        r: LoRA rank
+        alpha: LoRA alpha scaling
+        dropout: Dropout rate for LoRA
+        targets: List of target module names (e.g., ["qkv", "proj", "fc1", "fc2"])
+        bias_mode: Bias handling mode
+        include_blocks: Optional list of block indices to apply LoRA to (e.g., [6, 7, 8, 9, 10, 11]).
+                       If None, applies to all blocks.
     """
     replaced = []
     for name, lin in list(iter_linear_targets(model, targets)):
+        # Check if this layer is in a specified block (if include_blocks is provided)
+        if include_blocks is not None and len(include_blocks) > 0:
+            # Extract block number from the module name (e.g., "blocks.6.attn.qkv" -> 6)
+            if "blocks." in name:
+                try:
+                    block_idx = int(name.split("blocks.")[1].split(".")[0])
+                    if block_idx not in include_blocks:
+                        # Skip this layer as it's not in the specified blocks
+                        continue
+                except (IndexError, ValueError):
+                    # If we can't parse the block index, apply LoRA anyway
+                    pass
+        
         wrapped = LoRALinear(lin, r=r, alpha=alpha, dropout=dropout, bias_mode=bias_mode)
         set_module_by_name(model, name, wrapped)
         replaced.append(name)

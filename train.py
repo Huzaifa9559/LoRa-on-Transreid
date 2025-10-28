@@ -62,12 +62,21 @@ if __name__ == '__main__':
     if cfg.MODEL.DIST_TRAIN:
         torch.distributed.init_process_group(backend='nccl', init_method='env://')
 
-    os.environ['CUDA_VISIBLE_DEVICES'] = cfg.MODEL.DEVICE_ID
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(cfg.MODEL.DEVICE_ID)
     train_loader, train_loader_normal, val_loader, num_query, num_classes, camera_num, view_num = make_dataloader(cfg)
 
     model = make_model(cfg, num_class=num_classes, camera_num=camera_num, view_num = view_num)
 
+    # Move model to device
+    device = cfg.MODEL.DEVICE if torch.cuda.is_available() else 'cpu'
+    model = model.to(device)
+    logger.info(f"Model moved to device: {device}")
+
     loss_func, center_criterion = make_loss(cfg, num_classes=num_classes)
+    
+    # Move loss functions to device if they have parameters
+    if center_criterion is not None:
+        center_criterion = center_criterion.to(device)
 
     optimizer, optimizer_center = make_optimizer(cfg, model, center_criterion)
 

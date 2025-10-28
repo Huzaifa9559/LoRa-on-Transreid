@@ -24,7 +24,7 @@ INPUT:
 
 DATASETS:
   NAMES: ('market1501')
-  ROOT_DIR: 'C:/Users/22K-4310/Desktop/FYP material/New folder/FineTune_TransReid/data'
+  ROOT_DIR: 'C:/Users/22K-4310/Desktop/FYP material/FineTune_TransReid/data'
 
 DATALOADER:
   SAMPLER: 'softmax_triplet'
@@ -55,7 +55,7 @@ LORA:
   MERGE_AT_EVAL: False
   BIAS: "none"
   SAVE_ADAPTER_ONLY: True
-  #BLOCKS: [6,7,8,9,10,11] 
+  BLOCKS: [6, 7, 8, 9, 10, 11]  # Apply LoRA only to layers 6-11
 
 TEST:
   EVAL: True
@@ -65,4 +65,4 @@ TEST:
   NECK_FEAT: 'before'
   FEAT_NORM: 'yes'
 
-OUTPUT_DIR: '../logs/market_vit_transreid_stride_lora'
+OUTPUT_DIR: '../logs/market_vit_transreid_stride_lora_blocks_6_11'

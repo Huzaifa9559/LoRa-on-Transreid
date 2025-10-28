@@ -422,6 +422,13 @@ def make_model(cfg, num_class, camera_num, view_num):
     # LoRA injection for transformer models
     if cfg.LORA.ENABLED and cfg.MODEL.NAME == 'transformer':
         print('===========Injecting LoRA adapters===========')
+        # Prepare include_blocks parameter (only pass if specified)
+        include_blocks = cfg.LORA.BLOCKS if cfg.LORA.BLOCKS and len(cfg.LORA.BLOCKS) > 0 else None
+        if include_blocks:
+            print(f'Applying LoRA to blocks: {include_blocks}')
+        else:
+            print('Applying LoRA to all blocks')
+        
         replaced = inject_lora_into_vit(
             model.base,  # Apply to the backbone (TransReID instance)
             r=cfg.LORA.R,
@@ -429,7 +436,7 @@ def make_model(cfg, num_class, camera_num, view_num):
             dropout=cfg.LORA.DROPOUT,
             targets=cfg.LORA.TARGETS,
             bias_mode=cfg.LORA.BIAS,
-            #include_blocks=list(range(6, 12)),
+            include_blocks=include_blocks,
         )
         print(f'LoRA applied to {len(replaced)} layers: {replaced[:3]}...' if len(replaced) > 3 else f'LoRA applied to {len(replaced)} layers: {replaced}')
         
