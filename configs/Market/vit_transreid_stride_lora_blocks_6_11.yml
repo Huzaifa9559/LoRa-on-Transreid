@@ -23,7 +23,7 @@ INPUT:
   PIXEL_STD: [0.5, 0.5, 0.5]
 
 DATASETS:
-  NAMES: ('market1501')
+  NAMES: ('market1501-mini')
   ROOT_DIR: 'C:/Users/22K-4310/Desktop/FYP material/FineTune_TransReid/data'
 
 DATALOADER:
