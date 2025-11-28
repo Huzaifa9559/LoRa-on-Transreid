@@ -23,7 +23,7 @@ class Market1501(BaseImageDataset):
     # identities: 1501 (+1 for background)
     # images: 12936 (train) + 3368 (query) + 15913 (gallery)
     """
-    dataset_dir = 'market1501-mini'
+    dataset_dir = 'market1501'
 
     def __init__(self, root='', verbose=True, pid_begin = 0, **kwargs):
         super(Market1501, self).__init__()
@@ -39,7 +39,7 @@ class Market1501(BaseImageDataset):
         gallery = self._process_dir(self.gallery_dir, relabel=False)
 
         if verbose:
-            print("=> Market1501 mini loaded")
+            print("=> Market1501 loaded")
             self.print_dataset_statistics(train, query, gallery)
 
         self.train = train

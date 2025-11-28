@@ -14,7 +14,7 @@ from .occ_duke import OCC_DukeMTMCreID
 from .vehicleid import VehicleID
 from .veri import VeRi
 __factory = {
-   'market1501-mini': Market1501,
+   'market1501': Market1501,
    'dukemtmc': DukeMTMCreID,
    'msmt17': MSMT17,
    'occ_duke': OCC_DukeMTMCreID,
@@ -58,6 +58,10 @@ def make_dataloader(cfg):
 
     num_workers = cfg.DATALOADER.NUM_WORKERS
 
+    print(f"DEBUG: cfg.DATASETS.NAMES = {cfg.DATASETS.NAMES}")
+    print(f"DEBUG: type of cfg.DATASETS.NAMES = {type(cfg.DATASETS.NAMES)}")
+    print(f"DEBUG: Available factory keys = {list(__factory.keys())}")
+    
     dataset = __factory[cfg.DATASETS.NAMES](root=cfg.DATASETS.ROOT_DIR)
 
     train_set = ImageDataset(dataset.train, train_transforms)
