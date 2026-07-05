@@ -1,177 +1,241 @@
-![Python >=3.5](https://img.shields.io/badge/Python->=3.5-yellow.svg)
-![PyTorch >=1.0](https://img.shields.io/badge/PyTorch->=1.6-blue.svg)
+![Python >=3.8](https://img.shields.io/badge/Python->=3.8-yellow.svg)
+![PyTorch >=1.6](https://img.shields.io/badge/PyTorch->=1.6-blue.svg)
+![PEFT](https://img.shields.io/badge/PEFT-LoRA-green.svg)
+![Task](https://img.shields.io/badge/Task-Person%20Re--ID-orange.svg)
 
-# [ICCV2021] TransReID: Transformer-based Object Re-Identification [[pdf]](https://openaccess.thecvf.com/content/ICCV2021/papers/He_TransReID_Transformer-Based_Object_Re-Identification_ICCV_2021_paper.pdf)
+# LoRA on TransReID — Parameter-Efficient Fine-Tuning of a ViT Re-ID Backbone
 
-The *official* repository for  [TransReID: Transformer-based Object Re-Identification](https://arxiv.org/abs/2102.04378) achieves state-of-the-art performances on object re-ID, including person re-ID and vehicle re-ID.
+This repository is a research fork of the official [**TransReID**](https://github.com/damo-cv/TransReID) codebase, extended with a **Low-Rank Adaptation (LoRA)** parameter-efficient fine-tuning (PEFT) layer for the ViT-Base backbone. It contains the LoRA experimental phase of our study:
 
-## News
-- 🌟 2023.11 [VGSG](https://arxiv.org/abs/2311.07514.pdf) for Text-based Person Search is accepted to TIP. 
-- 🌟 2023.9 [RGANet](https://arxiv.org/abs/2309.03558) for Occluded Person Re-identification is accepted to TIFS. 
-- 2023.3 The general human representation pre-training model. [SOLIDER](https://github.com/tinyvision/SOLIDER)
-- 2021.12 We improve TransReID via self-supervised pre-training. Please refer to [TransReID-SSL](https://github.com/michuanhaohao/TransReID-SSL)
-- 2021.3  We release the code of TransReID.
+> **Efficient Person Re-Identification via LoRA and SSF: A Comparative PEFT Study on ViT Backbone in TransReID**
+> Huzaifa Naseer, Tameema Rehman, Anas Ashfaq, Farrukh Hasan Syed
+> *Department of Computer Science, FAST-NUCES, Karachi, Pakistan*
+
+Full paper resources and the companion SSF experiments: <https://github.com/Huzaifa9559/PEFT-on-Transreid.git>
 
 ## Pipeline
 
-![framework](figs/framework.png)
+LoRA adapters are injected into the linear projections (`qkv`, `proj`, `fc1`, `fc2`) of the ViT-Base transformer blocks. The rest of the TransReID pipeline — patch embedding, positional embedding, SIE, JPM, and the Re-ID head — is left intact; the backbone is frozen and only the adapters and the head are trained. The figure below shows the `4–11` depth-placement regime (blocks 0–3 frozen, blocks 4–11 adapted).
 
-## Abaltion Study of Transformer-based Strong Baseline
+![LoRA injection pipeline on the TransReID ViT-Base backbone](figs/lora_pipeline.png)
 
-![framework](figs/ablation.png)
+---
 
+## 1. Motivation
 
+Full fine-tuning of ViT-based Re-ID models such as TransReID is expensive in memory and compute, and every new camera domain requires storing a full copy of the backbone. PEFT addresses this by **freezing the pretrained backbone** and training only a small set of task-specific parameters.
 
-## Requirements
+This repository asks a concrete question on a real Re-ID testbed: **how far can LoRA recover full-fine-tuning accuracy on TransReID / Market-1501, and at what memory cost?** We keep the entire TransReID training recipe fixed and vary only the LoRA design axes — depth placement, rank `r`, scaling `α`, and module targets — so that every accuracy/memory difference is attributable to the PEFT configuration alone.
+
+---
+
+## 2. What This Fork Changes
+
+All modifications are additive; the TransReID architecture (SIE, JPM, Re-ID head) and the Market-1501 evaluation protocol are **unchanged**. LoRA is injected into the transformer-block linear layers only.
+
+| Area | File(s) added / modified | Purpose |
+|------|--------------------------|---------|
+| **LoRA module** | `reid/peft/lora.py` | `LoRALinear` wrapper, ViT injection, block filtering, trainable-parameter masking, adapter save/load, eval-time merge |
+| **Model wiring** | `model/make_model.py` | Injects LoRA into `model.base` after backbone build; freezes backbone; unfreezes adapters + Re-ID head |
+| **Config schema** | `config/defaults.py` | New `_C.LORA` config node (`ENABLED`, `R`, `ALPHA`, `DROPOUT`, `TARGETS`, `BLOCKS`, `TRAIN_HEAD`, `MERGE_AT_EVAL`, `BIAS`, `SAVE_ADAPTER_ONLY`) |
+| **Checkpointing** | `processor/processor.py` | Adapter-only checkpoint saving (stores just the LoRA tensors, not the full backbone) |
+| **Experiment configs** | `configs/Market/vit_transreid_stride_lora*.yml` | Ready-to-run LoRA sweep configurations |
+| **Verification** | `test_lora_blocks.py` | Sanity-checks that LoRA lands only on the intended blocks and reports the trainable-parameter ratio |
+| **Data subsetting** | `make_market1501_subset.py` | Builds reduced Market-1501 splits for fast configuration sweeps |
+
+### How LoRA is applied
+
+For a frozen linear layer `W`, LoRA learns a low-rank update:
+
+```
+W' = W + (α / r) · B · A ,   A ∈ ℝ^{r×k},  B ∈ ℝ^{d×r}
+```
+
+Only `A`, `B` (and, optionally, a LoRA bias) are trainable. Adapters are attached to the four parameter-heavy projections inside each adapted transformer block:
+
+- `qkv` and `proj` — the MHSA cross-token routing
+- `fc1` and `fc2` — the FFN per-token non-linear transform
+
+The backbone weights, patch embedding, SIE, and JPM parameters stay frozen; the LoRA adapters, LayerNorm parameters, and the Re-ID head remain trainable.
+
+---
+
+## 3. Configuration Space
+
+The LoRA sweep is driven entirely from YAML (`configs/Market/`). The axes explored in the paper:
+
+| Axis | Values | Notes |
+|------|--------|-------|
+| **Depth (blocks)** | `0–11`, `4–11`, `6–11` | Set via `LORA.BLOCKS`; empty = all 12 blocks |
+| **Rank `r`** | `8, 16, 32` | `LORA.R` |
+| **Scaling `α`** | `16, 32, 48, 64` | `LORA.ALPHA`; recipe favors `α ≈ 2r` |
+| **Module targets** | `{qkv, proj, fc1, fc2}` (default) or `{qkv, proj}` (attention-only ablation) | `LORA.TARGETS` |
+
+Reference baseline: **full fine-tuning** (`LORA.ENABLED: False`), all TransReID weights trainable.
+
+---
+
+## 4. Key Results (Market-1501)
+
+All runs: single NVIDIA RTX 4000 Ada (20 GB), 60 epochs, AdamW, cosine decay, batch fit within 20 GB, seeds fixed. `ΔmAP` is the absolute gap from the full-fine-tuning baseline. `*` marks the attention-only ablation.
+
+| Blocks | r | α | mAP | Rank-1 | Rank-5 | Rank-10 | GPU (GB) | ΔmAP |
+|:------:|:-:|:-:|:---:|:------:|:------:|:-------:|:--------:|:----:|
+| **Baseline (Full FT)** | — | — | **88.0** | **94.4** | 98.2 | 99.0 | 11.5 | — |
+| 0–11 | 8 | 16 | 85.8 | 93.5 | 98.0 | 98.9 | 11.4 | −2.2 |
+| 0–11 | 16 | 16 | 75.5 | 88.5 | 95.8 | 97.4 | 10.6 | −12.5 |
+| 0–11 | 16 | 32 | 74.0 | 87.6 | 94.9 | 97.2 | 11.0 | −14.0 |
+| 4–11 | 8 | 16 | 80.5 | 91.5 | 96.9 | 98.2 | 8.03 | −7.5 |
+| 4–11 | 16 | 32 | 82.1 | 92.4 | 97.2 | 98.5 | 8.34 | −5.9 |
+| 4–11 | 16 | 48 | 82.7 | 92.5 | 97.5 | 98.6 | 8.01 | −5.3 |
+| **4–11** | **32** | **64** | **83.2** | **92.8** | 97.8 | 98.5 | **7.84** | **−4.8** |
+| 6–11 | 8 | 16 | 74.8 | 88.2 | 96.0 | 97.7 | 7.60 | −13.2 |
+| 6–11 | 16 | 16 | 75.3 | 89.2 | 96.1 | 97.5 | 6.90 | −12.7 |
+| 6–11 | 16 | 32 | 77.4 | 90.1 | 96.5 | 97.9 | 7.59 | −10.6 |
+| 6–11 | 16* | 32 | 74.6 | 88.5 | 96.3 | 97.7 | 7.06 | −13.4 |
+| 6–11 | 16 | 64 | 63.4 | 81.9 | 93.3 | 95.8 | 7.00 | −24.6 |
+| 6–11 | 32 | 64 | 78.9 | 90.6 | 96.8 | 98.4 | 7.06 | −9.1 |
+
+### Takeaways
+
+- **Depth placement dominates.** `4–11` is the best accuracy–memory compromise: **mAP 83.2 % (within ~5 points of baseline) at 7.84 GB — a ~30 % VRAM reduction.**
+- **Memory is driven by activations, not parameters.** `0–11` retains adapters (and thus activations) at full depth, so it barely saves memory; restricting to `4–11`/`6–11` frees early-block activations and drops VRAM to ~7–8 GB.
+- **Keep `α ≈ 2r`.** Aggressive scaling destabilizes training — `(6–11, r=16, α=64)` collapses to mAP 63.4 %.
+- **MLP adaptation matters.** Excluding `fc1/fc2` (attention-only `*`) costs several points of mAP for negligible memory savings.
+
+### Companion SSF results (from the paper)
+
+The paper also studies **SSF** (per-channel scale-and-shift) as a structurally different PEFT baseline (implemented in the companion repo). SSF reaches a very compact ~2.83–2.87 % trainable-parameter footprint (best mAP ≈ 79.9 % at full `0–11` coverage) but shows a larger accuracy gap than LoRA and relies more heavily on full-depth coverage. **LoRA and SSF are complementary:** LoRA when accuracy recovery is paramount, SSF when parameter budget / storage dominates.
+
+### Practical guideline
+
+| Constraint | Recommended config | Expected outcome |
+|------------|--------------------|------------------|
+| Maximize accuracy | Full FT, or `0–11` LoRA `r=8` | mAP ≈ 85–88 %, 11–11.5 GB |
+| ~30 % VRAM savings | `4–11` LoRA, `r=16–32`, `α≈2r` | mAP ≈ 82–83 %, 7.8–8.3 GB |
+| Tight GPU (~7 GB) | `6–11` LoRA, `r=16–32`, `α≈2r` | mAP ≈ 75–79 %, 7–7.6 GB |
+| Avoid instability | keep `α≈2r`; avoid `r=16, α=64` | smooth accuracy-vs-rank curve |
+
+---
+
+## 5. Setup
 
 ### Installation
 
 ```bash
 pip install -r requirements.txt
-(we use /torch 1.6.0 /torchvision 0.7.0 /timm 0.3.2 /cuda 10.1 / 16G or 32G V100 for training and evaluation.
-Note that we use torch.cuda.amp to accelerate speed of training which requires pytorch >=1.6)
+# torch / torchvision / timm / yacs / opencv-python
+# GPU used in the paper: NVIDIA RTX 4000 Ada (20 GB). torch.cuda.amp requires PyTorch >= 1.6.
 ```
 
-### Prepare Datasets
+See [`CUDA_SETUP_GUIDE.md`](CUDA_SETUP_GUIDE.md) for a step-by-step CUDA/PyTorch setup and `check_cuda.py` to verify the GPU is visible.
+
+### Prepare Market-1501
 
 ```bash
 mkdir data
 ```
 
-Download the person datasets [Market-1501](https://drive.google.com/file/d/0B8-rUzbwVRk0c054eEozWG9COHM/view), [MSMT17](https://arxiv.org/abs/1711.08565), [DukeMTMC-reID](https://arxiv.org/abs/1609.01775),[Occluded-Duke](https://github.com/lightas/Occluded-DukeMTMC-Dataset), and the vehicle datasets [VehicleID](https://www.pkuml.org/resources/pku-vehicleid.html), [VeRi-776](https://github.com/JDAI-CV/VeRidataset), 
-Then unzip them and rename them under the directory like
+Download [Market-1501](https://drive.google.com/file/d/0B8-rUzbwVRk0c054eEozWG9COHM/view), unzip, and place it as:
 
 ```
 data
-├── market1501
-│   └── images ..
-├── MSMT17
-│   └── images ..
-├── dukemtmcreid
-│   └── images ..
-├── Occluded_Duke
-│   └── images ..
-├── VehicleID_V1.0
-│   └── images ..
-└── VeRi
+└── market1501
     └── images ..
 ```
 
-### Prepare DeiT or ViT Pre-trained Models
-
-You need to download the ImageNet pretrained transformer model : [ViT-Base](https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-vitjx/jx_vit_base_p16_224-80ecf9dd.pth), [ViT-Small](https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-weights/vit_small_p16_224-15ec54c9.pth), [DeiT-Small](https://dl.fbaipublicfiles.com/deit/deit_small_distilled_patch16_224-649709d9.pth), [DeiT-Base](https://dl.fbaipublicfiles.com/deit/deit_base_distilled_patch16_224-df68dfff.pth)
-
-## Training
-
-We utilize 1  GPU for training.
+For fast configuration sweeps you can build a reduced split:
 
 ```bash
-python train.py --config_file configs/transformer_base.yml MODEL.DEVICE_ID "('your device id')" MODEL.STRIDE_SIZE ${1} MODEL.SIE_CAMERA ${2} MODEL.SIE_VIEW ${3} MODEL.JPM ${4} MODEL.TRANSFORMER_TYPE ${5} OUTPUT_DIR ${OUTPUT_DIR} DATASETS.NAMES "('your dataset name')"
+python make_market1501_subset.py --help
 ```
 
-#### Arguments
+### Pretrained ViT backbone
 
-- `${1}`: stride size for pure transformer, e.g. [16, 16], [14, 14], [12, 12]
-- `${2}`: whether using SIE with camera, True or False.
-- `${3}`: whether using SIE with view, True or False.
-- `${4}`: whether using JPM, True or False.
-- `${5}`: choose transformer type from `'vit_base_patch16_224_TransReID'`,(The structure of the deit is the same as that of the vit, and only need to change the imagenet pretrained model)  `'vit_small_patch16_224_TransReID'`,`'deit_small_patch16_224_TransReID'`,
-- `${OUTPUT_DIR}`: folder for saving logs and checkpoints, e.g. `../logs/market1501`
+Download the ImageNet-pretrained [ViT-Base](https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-vitjx/jx_vit_base_p16_224-80ecf9dd.pth) and point `MODEL.PRETRAIN_PATH` in the config to it.
 
-**or you can directly train with following  yml and commands:**
+---
+
+## 6. Running LoRA Experiments
+
+Every LoRA run is a single config file. Edit `LORA.BLOCKS`, `LORA.R`, `LORA.ALPHA`, and `LORA.TARGETS` to move around the configuration space, and update `DATASETS.ROOT_DIR` / `MODEL.PRETRAIN_PATH` to your paths.
 
 ```bash
-# DukeMTMC transformer-based baseline
-python train.py --config_file configs/DukeMTMC/vit_base.yml MODEL.DEVICE_ID "('0')"
-# DukeMTMC baseline + JPM
-python train.py --config_file configs/DukeMTMC/vit_jpm.yml MODEL.DEVICE_ID "('0')"
-# DukeMTMC baseline + SIE
-python train.py --config_file configs/DukeMTMC/vit_sie.yml MODEL.DEVICE_ID "('0')"
-# DukeMTMC TransReID (baseline + SIE + JPM)
-python train.py --config_file configs/DukeMTMC/vit_transreid.yml MODEL.DEVICE_ID "('0')"
-# DukeMTMC TransReID with stride size [12, 12]
-python train.py --config_file configs/DukeMTMC/vit_transreid_stride.yml MODEL.DEVICE_ID "('0')"
+# LoRA on all blocks (0–11), r=8, α=16
+python train.py --config_file configs/Market/vit_transreid_stride_lora.yml MODEL.DEVICE_ID "('0')"
 
-# MSMT17
-python train.py --config_file configs/MSMT17/vit_transreid_stride.yml MODEL.DEVICE_ID "('0')"
-# OCC_Duke
-python train.py --config_file configs/OCC_Duke/vit_transreid_stride.yml MODEL.DEVICE_ID "('0')"
-# Market
+# Best compromise: LoRA on blocks 4–11, r=32, α=64
+python train.py --config_file configs/Market/vit_transreid_stride_lora_blocks_6_11.yml \
+    MODEL.DEVICE_ID "('0')" LORA.BLOCKS "[4,5,6,7,8,9,10,11]" LORA.R 32 LORA.ALPHA 64
+```
+
+Any LoRA field can be overridden from the command line, e.g. `LORA.TARGETS "['qkv','proj']"` for the attention-only ablation.
+
+### Full fine-tuning baseline
+
+```bash
 python train.py --config_file configs/Market/vit_transreid_stride.yml MODEL.DEVICE_ID "('0')"
-# VeRi
-python train.py --config_file configs/VeRi/vit_transreid_stride.yml MODEL.DEVICE_ID "('0')"
-
-# VehicleID (The dataset is large and we utilize 4 v100 GPUs for training )
-CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node=4 --master_port 66666 train.py --config_file configs/VehicleID/vit_transreid_stride.yml MODEL.DIST_TRAIN True
-#  or using following commands:
-Bash dist_train.sh 
 ```
 
-Tips:  For person datasets  with size 256x128, TransReID with stride occupies 12GB GPU memory and TransReID occupies 7GB GPU memory. 
+### Evaluation
 
-## Evaluation
+Adapter-only checkpoints are saved when `LORA.SAVE_ADAPTER_ONLY: True`; they are loaded automatically on top of the frozen backbone at test time.
 
 ```bash
-python test.py --config_file 'choose which config to test' MODEL.DEVICE_ID "('your device id')" TEST.WEIGHT "('your path of trained checkpoints')"
+python test.py --config_file configs/Market/vit_transreid_stride_lora.yml \
+    MODEL.DEVICE_ID "('0')" TEST.WEIGHT '../logs/market_vit_transreid_stride_lora/transformer_60.pth'
 ```
 
-**Some examples:**
+### Verify LoRA placement
 
 ```bash
-# DukeMTMC
-python test.py --config_file configs/DukeMTMC/vit_transreid_stride.yml MODEL.DEVICE_ID "('0')"  TEST.WEIGHT '../logs/duke_vit_transreid_stride/transformer_120.pth'
-# MSMT17
-python test.py --config_file configs/MSMT17/vit_transreid_stride.yml MODEL.DEVICE_ID "('0')" TEST.WEIGHT '../logs/msmt17_vit_transreid_stride/transformer_120.pth'
-# OCC_Duke
-python test.py --config_file configs/OCC_Duke/vit_transreid_stride.yml MODEL.DEVICE_ID "('0')" TEST.WEIGHT '../logs/occ_duke_vit_transreid_stride/transformer_120.pth'
-# Market
-python test.py --config_file configs/Market/vit_transreid_stride.yml MODEL.DEVICE_ID "('0')"  TEST.WEIGHT '../logs/market_vit_transreid_stride/transformer_120.pth'
-# VeRi
-python test.py --config_file configs/VeRi/vit_transreid_stride.yml MODEL.DEVICE_ID "('0')" TEST.WEIGHT '../logs/veri_vit_transreid_stride/transformer_120.pth'
-
-# VehicleID (We test 10 times and get the final average score to avoid randomness)
-python test.py --config_file configs/VehicleID/vit_transreid_stride.yml MODEL.DEVICE_ID "('0')" TEST.WEIGHT '../logs/vehicleID_vit_transreid_stride/transformer_120.pth'
+python test_lora_blocks.py
+# prints which blocks received adapters + the trainable-parameter percentage
 ```
 
-## Trained Models and logs (Size 256)
+---
 
-![framework](figs/sota.png)
+## 7. LoRA Config Reference
 
-<table>
-<thead>
-<tr><th style='text-align:center;' >Datasets</th><th style='text-align:center;' >MSMT17</th><th style='text-align:center;' >Market</th><th style='text-align:center;' >Duke</th><th style='text-align:center;' >OCC_Duke</th><th style='text-align:center;' >VeRi</th><th style='text-align:center;' >VehicleID</th></tr></thead>
-<tbody><tr><td style='text-align:center;' ><strong>Model</strong></td><td style='text-align:center;' >mAP | R1</td><td style='text-align:center;' >mAP | R1</td><td style='text-align:center;' >mAP | R1</td><td style='text-align:center;' >mAP | R1</td><td style='text-align:center;' >mAP | R1</td><td style='text-align:center;' >R1 | R5</td></tr><tr><td style='text-align:center;'rowspan="2" ><strong>Baseline(ViT)</strong></td>
-  <td style='text-align:center;' >61.8 | 81.8</td><td style='text-align:center;' >87.1 | 94.6</td><td style='text-align:center;' >79.6 | 89.0</td><td style='text-align:center;' >53.8 | 61.1</td><td style='text-align:center;' >79.0 | 96.6</td><td style='text-align:center;' >83.5 | 96.7</td></tr><tr>  <td style='text-align:center;' ><a href='https://drive.google.com/file/d/1iF5JNPw9xi-rLY3Ri9EY-PFAkK6Vg_Pf/view?usp=sharing'>model</a> | <a href='https://drive.google.com/file/d/1oCnLpwv-V_RU7_BNXFsIgXKxAm2QAD7n/view?usp=sharing'>log</a></td><td style='text-align:center;' ><a href='https://drive.google.com/file/d/1crYsKRrW4eUq6abT4KK8_atMLFsbq56W/view?usp=sharing'>model</a> | <a href='https://drive.google.com/file/d/1YSo6FgJ42SOv3TTQvzE_4V1r3Ma608lZ/view?usp=sharing'>log</a></td><td style='text-align:center;' ><a href='https://drive.google.com/file/d/17GQqFuTleAZWLD92AtEd1c_dnTyZHl4k/view?usp=sharing'>model</a> | <a href='https://drive.google.com/file/d/1a8Ci3qN4Y47LRWqgbeF4HJON1hBmeLCn/view?usp=sharing'>log</a></td><td style='text-align:center;' ><a href='https://drive.google.com/file/d/1uHX5j7yepalN1EINdF9lzrT3iDWj-pr9/view?usp=sharing'>model</a> | <a href='https://drive.google.com/file/d/1urUfrvML_7qKvqXyz6Yl4msJS6nTNbe5/view?usp=sharing'>log</a></td><td style='text-align:center;' ><a href='https://drive.google.com/file/d/1Qu13CS5MK1ANsXoYgkX5Kji383SbQbn9/view?usp=sharing'>model</a> | <a href='https://drive.google.com/file/d/17Io4ECJixITduJ-bey7yix1Unwv9PBKd/view?usp=sharing'>log</a></td><td style='text-align:center;' ><a href='https://drive.google.com/file/d/1loUlRlM9DCiIAkq5mpL4LrJiUC3G3fMp/view?usp=sharing'>model</a> | <a href='https://drive.google.com/file/d/12gOI9fivkRj5utCPciKS6Z1SNM8V2SGT/view?usp=sharing'>test</a></td></tr><tr><td style='text-align:center;'rowspan="2" ><strong>TransReID<sup>*</sup>(ViT)</strong></td>
-  <td style='text-align:center;' >67.8 | 85.3</td><td style='text-align:center;' >89.0 | 95.1</td><td style='text-align:center;' >82.2 | 90.7</td><td style='text-align:center;' >59.5 | 67.4</td><td style='text-align:center;' >82.1 | 97.4</td><td style='text-align:center;' >85.2 | 97.4</td></tr><tr>
-  <td style='text-align:center;' ><a href='https://drive.google.com/file/d/1x6Na97ycxS0t2Dn_0iRKWe1U5ccIqASK/view?usp=sharing'>model</a> | <a href='https://drive.google.com/file/d/14TPDaU2T0WLTsg0iEHJFnqwzSTrpzC0B/view?usp=sharing'>log</a></td><td style='text-align:center;' ><a href='https://drive.google.com/file/d/11p4RjmpCGGAS-876VEt7OoFrUeHTUlyO/view?usp=sharing'>model</a> | <a href='https://drive.google.com/file/d/1SWNtnhEVoDu3Uixf5XBCQlvXYapVrk7w/view?usp=sharing'>log</a></td><td style='text-align:center;' ><a href='https://drive.google.com/file/d/1BipxoqyThefQviJzuJIKtFJvNblIlPGN/view?usp=sharing'>model</a> | <a href='https://drive.google.com/file/d/11dE_kbNWbvmo-3qUShN7qsrTsqd89Eoc/view?usp=sharing'>log</a></td><td style='text-align:center;' ><a href='https://drive.google.com/file/d/1VJg4rTA43TCHkR9hTIBu8S2Sy1KiTnSJ/view?usp=sharing'>model</a> | <a href='https://drive.google.com/file/d/1I1xTSBl1v-QBSyxxAB7xIszW_fu9oT6g/view?usp=sharing'>log</a></td><td style='text-align:center;' ><a href='https://drive.google.com/file/d/1SquTlBhl_pahsa5752KoGDBPY-AZpoSg/view?usp=sharing'>model</a> | <a href='https://drive.google.com/file/d/1H3MpDrA61HMmo8x8teANpCxY7BoGo09r/view?usp=sharing'>log</a></td><td style='text-align:center;' ><a href='https://drive.google.com/file/d/13ArCZutLuFrAoZpBuuk1y3EW91cYubmU/view?usp=sharing'>model</a> | <a href='https://drive.google.com/file/d/1ibJjqyLFvMv8vO9WanVi-5pYsJD4LY7K/view?usp=sharing'>test</a></td></tr><tr><td style='text-align:center;'rowspan="2" ><strong>TransReID<sup>*</sup>(DeiT)</strong></td>
-  <td style='text-align:center;' >66.3 | 84.0</td><td style='text-align:center;' >88.5 | 95.1</td><td style='text-align:center;' >81.9 | 90.7</td><td style='text-align:center;' >57.7 | 65.2</td><td style='text-align:center;' >82.4 | 97.1</td><td style='text-align:center;' >86.0 | 97.6</td></tr><tr>
-  <td style='text-align:center;' ><a href='https://drive.google.com/file/d/1WSUD0gKjGIG_gzTc2izH_y-EuDzweN95/view?usp=sharing'>model</a> | <a href='https://drive.google.com/file/d/1-YWh-Z1JVN8xzjG7PNyN2TpWN4Z1eUvP/view?usp=sharing'>log</a></td><td style='text-align:center;' ><a href='https://drive.google.com/file/d/1cbUK2KozdPSoewzvF0ucFQnZ0yfZiu_H/view?usp=sharing'>model</a> | <a href='https://drive.google.com/file/d/1C9glb0kc5thfU3U9Yrr6z7h5oYgMwHfy/view?usp=sharing'>log</a></td><td style='text-align:center;' ><a href='https://drive.google.com/file/d/1ltaX9zGFO31Wwwu47K9c4WTTBZVLdzLw/view?usp=sharing'>model</a> | <a href='https://drive.google.com/file/d/13H9usPg7pG5b6Eglx0EiKDiU6n3chBnT/view?usp=sharing'>log</a></td><td style='text-align:center;' ><a href='https://drive.google.com/file/d/1YJkBiMb5oVBnO6GXYW3Y_hFkR-Pl5ikC/view?usp=sharing'>model</a> | <a href='https://drive.google.com/file/d/1xnPlCw3w5obBpEAaI8Sb7Z5Bh9dPcZtL/view?usp=sharing'>log</a></td><td style='text-align:center;' ><a href='https://drive.google.com/file/d/1n26yrqTwu8bvaS-L_8mmiPlIrw_2_Ryo/view?usp=sharing'>model</a> | <a href='https://drive.google.com/file/d/11hTccnvJCi8Be_1fArX3mWqgdwOarxAf/view?usp=sharing'>log</a></td><td style='text-align:center;' ><a href='https://drive.google.com/file/d/1YC8dvKiCg5qCKpRc4kHemaUdFdBePkAk/view?usp=sharing'>model</a> | <a href='https://drive.google.com/file/d/1cELmjTLj5Lo9QwJuDGbqftwjeYAQD17k/view?usp=sharing'>test</a></td></tr></tbody>
-</table>
-
-Note: We reorganize code and the performances are slightly different from the paper's.
-
-## Acknowledgement
-
-Codebase from [reid-strong-baseline](https://github.com/michuanhaohao/reid-strong-baseline) , [pytorch-image-models](https://github.com/rwightman/pytorch-image-models)
-
-We import veri776 viewpoint label from repo: https://github.com/Zhongdao/VehicleReIDKeyPointData
-
-## Citation
-
-If you find this code useful for your research, please cite our paper
-
+```yaml
+LORA:
+  ENABLED: True                          # master switch
+  R: 32                                  # rank r
+  ALPHA: 64                              # scaling α (aim for α ≈ 2r)
+  DROPOUT: 0.05
+  TARGETS: ["qkv", "proj", "fc1", "fc2"] # ["qkv","proj"] = attention-only ablation
+  BLOCKS: [4, 5, 6, 7, 8, 9, 10, 11]     # empty/omit = all 12 blocks
+  TRAIN_HEAD: True                       # keep the Re-ID head trainable
+  MERGE_AT_EVAL: False                   # fold adapters into base weights at eval
+  BIAS: "none"                           # "none" | "lora" | "all"
+  SAVE_ADAPTER_ONLY: True                # checkpoint stores only adapter tensors
 ```
+
+---
+
+## 8. Citation
+
+If you use this repository or its findings, please cite our study and the original TransReID:
+
+```bibtex
+@article{naseer2025peft,
+  title   = {Efficient Person Re-Identification via LoRA and SSF:
+             A Comparative PEFT Study on ViT Backbone in TransReID},
+  author  = {Naseer, Huzaifa and Rehman, Tameema and Ashfaq, Anas and Syed, Farrukh Hasan},
+  year    = {2025}
+}
+
 @InProceedings{He_2021_ICCV,
-    author    = {He, Shuting and Luo, Hao and Wang, Pichao and Wang, Fan and Li, Hao and Jiang, Wei},
-    title     = {TransReID: Transformer-Based Object Re-Identification},
-    booktitle = {Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV)},
-    month     = {October},
-    year      = {2021},
-    pages     = {15013-15022}
+  author    = {He, Shuting and Luo, Hao and Wang, Pichao and Wang, Fan and Li, Hao and Jiang, Wei},
+  title     = {TransReID: Transformer-Based Object Re-Identification},
+  booktitle = {Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV)},
+  year      = {2021},
+  pages     = {15013-15022}
 }
 ```
 
-## Contact
+---
 
-If you have any question, please feel free to contact us. E-mail: [shuting_he@zju.edu.cn](mailto:shuting_he@zju.edu.cn) , [haoluocsc@zju.edu.cn](mailto:haoluocsc@zju.edu.cn)
+## 9. Acknowledgement
 
+Built on top of [TransReID](https://github.com/damo-cv/TransReID), which itself derives from [reid-strong-baseline](https://github.com/michuanhaohao/reid-strong-baseline) and [pytorch-image-models](https://github.com/rwightman/pytorch-image-models). The LoRA formulation follows Hu et al. (ICLR 2022), and the companion SSF baseline follows Lian et al. (NeurIPS 2022).

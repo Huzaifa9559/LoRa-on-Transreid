@@ -24,7 +24,7 @@ INPUT:
 
 DATASETS:
   NAMES: ('market1501')
-  ROOT_DIR: 'C:/Users/22K-4310/Desktop/FYP material/New folder/FineTune_TransReid/data'
+  ROOT_DIR: ('./data')   # folder containing the market1501/ directory
 
 DATALOADER:
   SAMPLER: 'softmax_triplet'
