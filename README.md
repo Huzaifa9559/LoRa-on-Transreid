@@ -20,7 +20,7 @@ Vision Transformer (ViT) backbones such as TransReID achieve strong performance 
 ### Contributions
 
 1. **Systematic PEFT Comparison:** We evaluate weight-matrix updates (LoRA), activation-affine transformations (SSF), parallel bottleneck adapters, and lightweight parameter tuning (BitFit, LN-tuning) on a frozen ViT-Base backbone.
-2. **Classification Control (Framing 6):** We evaluate PEFT methods under pure Softmax Cross-Entropy classification, demonstrating that the PEFT accuracy gap in Re-ID is objective-driven (triplet manifold restructuring) rather than a backbone capacity limitation.
+2. **Classification Control (Framing 6):** We evaluate PEFT methods under pure Softmax Cross-Entropy classification, as a control suggesting that the PEFT accuracy gap in Re-ID is related to the metric-learning objective rather than solely to backbone capacity (single seed, Market-1501; the loss is not isolated, so this is a hypothesis).
 3. **Automated Reproducibility:** Diagnostic inspectors, unit test suites, and automated benchmark runners enable full replication of all reported metrics.
 
 ---
@@ -40,7 +40,7 @@ The backbone weights, patch embeddings, Side-Information Embeddings (SIE), and J
 
 ## 3. Configuration Space
 
-The PEFT sweep is driven entirely from YAML (`configs/Market/`, `configs/classification/`, `configs/MSMT17/`).
+The PEFT sweep is driven entirely from YAML (`configs/Market/`, `configs/classification/`).
 
 | Axis | Values | Notes |
 |------|--------|-------|
@@ -59,7 +59,7 @@ Reference baseline: **full fine-tuning** (`PEFT.METHOD: 'none'`), all TransReID 
 
 ### 4.1. Standard Person Re-ID Protocol
 
-All runs: single NVIDIA GPU, 60 epochs, AdamW, cosine decay, batch size 64, seeds fixed (`1234`). Evaluated on Market-1501 under single-query protocol. `ΔmAP` denotes absolute gap from Full FT baseline.
+All runs: single NVIDIA GPU, 60 epochs, AdamW, cosine decay, batch size 64, a single fixed seed (`1234`, no repeated runs). Evaluated on Market-1501 under single-query protocol. `ΔmAP` denotes absolute gap from Full FT baseline.
 
 | Blocks | Method | Config / Hyperparams | mAP | Rank-1 | Rank-5 | Rank-10 | GPU (GB) | Params (%) | ΔmAP |
 |:------:|:------:|:--------------------:|:---:|:------:|:------:|:-------:|:--------:|:----------:|:----:|
@@ -74,7 +74,7 @@ All runs: single NVIDIA GPU, 60 epochs, AdamW, cosine decay, batch size 64, seed
 
 ### 4.2. Classification Control Results (Framing 6)
 
-Evaluated under Softmax Cross-Entropy loss directly on global ViT features (`NECK: 'no'`), removing pairwise metric learning losses:
+Evaluated under Softmax Cross-Entropy loss directly on global ViT features (`NECK: 'no'`), removing pairwise metric learning losses. Single seed, Market-1501 only. Memory is lower than in Section 4.1 because BNNeck, JPM and SIE are disabled, so GPU figures are not comparable across the two tables.
 
 | Configuration | Method | Block Coverage | Trainable Params (%) | GPU (GB) | mAP (%) | Rank-1 (%) | Rank-5 (%) |
 |:-------------:|:------:|:--------------:|:--------------------:|:--------:|:-------:|:----------:|:----------:|
@@ -88,7 +88,7 @@ Evaluated under Softmax Cross-Entropy loss directly on global ViT features (`NEC
 
 - **Bottleneck Adapters reach near-baseline accuracy.** `0–11` adapter ($r=16$) achieves **85.9% mAP / 93.7% Rank-1** — within ~2 mAP of full fine-tuning at only 4.95% trainable parameters.
 - **Depth placement dominates.** `4–11` LoRA ($r=32, \alpha=64$) is the best accuracy–memory compromise: **mAP 83.2% at 7.84 GB VRAM — a ~30% memory reduction.**
-- **Classification Control proves objective gap.** Under pure classification loss, LoRA 0–11 ($r=8$) outperforms Full FT by **+1.5% mAP (82.0% vs. 80.5%)**, proving the PEFT accuracy gap in Re-ID is objective-driven (triplet manifold restructuring).
+- **Classification control suggests an objective effect.** Under pure classification loss, LoRA 0–11 ($r=8$) scores **+1.5% mAP over Full FT (82.0% vs. 80.5%)**. This is consistent with the PEFT gap in Re-ID depending on the metric-learning objective, but it comes from a single seed and does not isolate the triplet loss, so it is not conclusive.
 
 ### Practical Guidelines
 
@@ -169,8 +169,6 @@ python tools/run_experiment4.py
 # Run Classification Control benchmark suite
 python tools/run_classification_control.py
 
-# Run MSMT17 Frontier validation suite
-python tools/validate_msmt17_frontier.py
 ```
 
 ### Evaluation

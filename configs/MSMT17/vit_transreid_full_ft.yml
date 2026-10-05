@@ -1,6 +1,0 @@
-_BASE_: '../base/msmt17_transreid.yml'
-
-PEFT:
-  METHOD: 'none'
-
-OUTPUT_DIR: '../logs/msmt17_full_ft'

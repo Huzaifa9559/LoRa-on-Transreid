@@ -32,7 +32,7 @@ These questions are especially relevant for person re-identification (Re-ID) [7]
 
 ### Contributions:
 
-1. We present the first systematic comparison of five PEFT methods (LoRA, SSF, BitFit, LN-tuning, bottleneck adapters) on a ViT-based Re-ID backbone (TransReID), varying depth placement, rank, scaling, module targeting, and optimizer configuration across methods.
+1. We present a systematic comparison of five PEFT methods (LoRA, SSF, BitFit, LN-tuning, bottleneck adapters) on a ViT-based Re-ID backbone (TransReID), varying depth placement, rank, scaling, module targeting, and optimizer configuration across methods.
 2. We quantify accuracy–memory trade-offs for all methods and construct a configuration-effect map with a non-dominated frontier analysis that includes the lightweight baselines as additional recommender options.
 3. We derive practical guidelines for selecting PEFT configurations under GPU constraints, identifying stable and unstable regions in the combined configuration space and covering very small parameter budgets via BitFit/LN-tuning/adapters.
 
@@ -242,18 +242,20 @@ To determine whether the performance gap between PEFT and Full Fine-Tuning is an
 
 **Table 4: Classification Control Results on Market-1501.** Re-ID auxiliary modules (triplet loss, BNneck, JPM, SIE) disabled; trained under Softmax Cross-Entropy loss.
 
+Single seed (1234). Peak VRAM is lower than in Table 3 because BNNeck, JPM and SIE are disabled, so memory is not comparable across the two tables.
+
 | Model / Configuration | Method | Block Coverage | Trainable Params (%) | Peak VRAM (GB) | mAP (%) | Rank-1 (%) | Rank-5 (%) | Rank-10 (%) |
 |---|---|---|---|---|---|---|---|---|
 | **Full FT Baseline** | Full FT | 0–11 | 100.00% | 7.91 GB | 80.5% | 92.1% | 97.5% | 98.4% |
-| **LoRA 0–11 ($r=8, \alpha=16$)** | LoRA | 0–11 | **1.99%** | 8.14 GB | **82.0%** 🏆 | **92.6%** 🏆 | **98.0%** 🏆 | **98.7%** 🏆 |
-| **LoRA 4–11 ($r=32, \alpha=64$)** | LoRA | 4–11 | **4.12%** | **5.68 GB** ⚡ | **79.6%** | **90.7%** | **97.0%** | **98.6%** |
-| **LoRA 6–11 ($r=16, \alpha=32$)** | LoRA | 6–11 | **1.99%** | **4.39 GB** ⚡⚡ | **72.8%** | **88.0%** | **95.9%** | **97.4%** |
+| **LoRA 0–11 ($r=8, \alpha=16$)** | LoRA | 0–11 | **1.99%** | 8.14 GB | **82.0%** | **92.6%** | **98.0%** | **98.7%** |
+| **LoRA 4–11 ($r=32, \alpha=64$)** | LoRA | 4–11 | **4.12%** | **5.68 GB** | **79.6%** | **90.7%** | **97.0%** | **98.6%** |
+| **LoRA 6–11 ($r=16, \alpha=32$)** | LoRA | 6–11 | **1.99%** | **4.39 GB** | **72.8%** | **88.0%** | **95.9%** | **97.4%** |
 | **SSF 0–11 (Case 2)** | SSF | 0–11 | **2.83%** | 9.38 GB | **74.0%** | **89.4%** | **97.0%** | **98.1%** |
 
 #### Key Findings from the Classification Control Experiment:
 1. **LoRA Outperforms Full Fine-Tuning Under Pure Classification:** LoRA 0–11 ($r=8$) achieves **82.0% mAP** and **92.6% Rank-1**, outperforming Full FT (80.5% mAP, 92.1% Rank-1) by **+1.5% mAP** and **+0.5% Rank-1** while updating only **1.99% of backbone parameters**.
-2. **Empirical Confirmation of Framing 6:** The accuracy gap observed under the standard Re-ID protocol is **objective-driven** (caused by the fine-grained pairwise manifold restructuring demanded by Triplet Loss), NOT an architectural limitation of LoRA or the ViT backbone. Freezing 98%+ of the backbone acts as an effective regularizer under classification loss.
-3. **Preservation of the Non-Dominated Frontier:** LoRA 4–11 ($r=32$) retains **79.6% mAP / 90.7% Rank-1** (within 0.9% of Full FT) while reducing peak VRAM from 7.91 GB to **5.68 GB** (a **28.2% memory savings**), confirming its status as the primary efficiency-compromise recommendation across objectives.
+2. **Evidence consistent with Framing 6:** The accuracy gap observed under the standard Re-ID protocol appears to depend on the training objective rather than being purely an architectural limitation of LoRA or the ViT backbone. This is a hypothesis: the experiment changes the whole head (triplet, BNneck, JPM, SIE) at once and does not isolate the triplet loss, and it uses a single seed. One possible explanation is that freezing 98%+ of the backbone acts as a regularizer under classification loss; we did not test this.
+3. **Preservation of the Non-Dominated Frontier:** LoRA 4–11 ($r=32$) retains **79.6% mAP / 90.7% Rank-1** (within 0.9% of Full FT) while reducing peak VRAM from 7.91 GB to **5.68 GB** (a **28.2% memory savings**), supporting its status as the primary efficiency-compromise recommendation across objectives.
 
 ### 4.8. Lightweight PEFT Baselines on Market-1501
 
@@ -343,7 +345,7 @@ Person Re-ID enables useful operational workflows but creates surveillance risk 
 
 This study is deliberately scoped to one backbone (TransReID with ViT-Base), one dataset (Market-1501), and focused configuration grids for each PEFT method. This deliberate scope allows a clean, controlled comparison between two structurally distinct PEFT paradigms, but it also bounds the generality of the findings. We identify three concrete limitations and corresponding directions for future work.
 
-**Single dataset evaluation for SSF.** All SSF experiments are conducted on Market-1501 only. Cross-dataset generalization of SSF configuration patterns, for instance on larger or more challenging Re-ID benchmarks, remains untested. Future work should replicate the SSF block coverage sweep on additional datasets to determine whether the steep accuracy degradation under partial coverage (4–11, 6–11) is dataset-specific or a structural property of SSF on ViT backbones.
+**Single dataset evaluation.** All experiments (LoRA, SSF, BitFit, LN-tuning, adapters and the classification control) are conducted on Market-1501 only, with a single seed (1234) and no repeated runs. Cross-dataset generalization of SSF configuration patterns, for instance on larger or more challenging Re-ID benchmarks, remains untested. Future work should replicate the SSF block coverage sweep on additional datasets to determine whether the steep accuracy degradation under partial coverage (4–11, 6–11) is dataset-specific or a structural property of SSF on ViT backbones.
 
 **Configuration grid boundaries.** The LoRA rank grid (r ∈ {8, 16, 32}) and scaling grid (α ∈ {16, 32, 48, 64}) were chosen to balance coverage with computational cost. Very low ranks (r < 8) and very high ranks (r > 32) are not evaluated; it remains open whether the instability observed at high rank in the 0–11 regime persists at r = 64 or higher. Similarly, the SSF configuration space currently has no operation-type ablation: we apply SSF uniformly after all four operation types per block. A future ablation isolating the contribution of LayerNorm-specific SSF modules (which cannot benefit from zero-FLOPs reparameterization) would clarify whether those positions contribute meaningfully or introduce unnecessary interaction with the existing normalization operations in the transformer block.
 

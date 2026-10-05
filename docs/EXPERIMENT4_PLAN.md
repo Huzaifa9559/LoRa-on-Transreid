@@ -37,8 +37,7 @@ land on the non-dominated frontier (per the review's "multi-seed" ask).
 - **PEFT-aware optimizer:** `solver/make_optimizer.py` already gives **SSF params `lr*10`** and
   **bias params `lr * BIAS_LR_FACTOR`** (relevant for BitFit — see §6.2). SSF params get
   weight-decay 0.
-- **Evaluation / runner pattern:** `tools/run_classification_control.py` and
-  `tools/validate_msmt17_frontier.py` both loop configs → `make_model` → `make_loss` →
+- **Evaluation / runner pattern:** `tools/run_classification_control.py` loops configs → `make_model` → `make_loss` →
   `make_optimizer` → `do_train`, then report `param_ratio / peak_vram / time_seconds`.
 - **Config pattern:** YAML + `_BASE_` inheritance → `config/loader.merge_config_file` →
   `config/peft_config.normalize_peft_config` (mutual-exclusion + SSF Case-2 overrides).
@@ -190,7 +189,7 @@ Depth window semantics:
 ### 3.8 Runner — `tools/run_experiment4.py` (new file, vast.ai orchestrator)
 
 **This is the piece that runs on vast.ai.** It replaces the "loop-in-process" pattern of the
-existing `tools/validate_msmt17_frontier.py` with a **sequential, resumable, log-streaming
+existing `tools/run_classification_control.py` with a **sequential, resumable, log-streaming
 orchestrator** designed for long unattended GPU runs:
 
 **Behavior**
@@ -355,9 +354,6 @@ nvidia-smi                                  # GPU util / VRAM
 
 - **Nothing extra to install** beyond `run.py --setup-only` (deps + weights + Market-1501).
 - Market-1501 archive is downloaded by `run.py` (Google Drive with HTTP-mirror fallback).
-- MSMT17 (only if you later extend to reviewer-W2 validation) is Google-Drive-only via
-  `datasets/download_msmt17.py::ensure_msmt17` — drop the archive in `data/MSMT17/` manually if
-  Drive is blocked.
 
 ## 5. What Is NOT in the Repo / Needs to Be Obtained Externally
 
@@ -365,10 +361,6 @@ nvidia-smi                                  # GPU util / VRAM
 - **Market-1501** — the raw `data/market1501/Market-1501-v15.09.15.zip` already exists in the
   repo, so **no external download needed** if you run on Market-1501. (You should — the 9 runs
   reuse the existing Market-1501 base config.)
-- If you later validate on **MSMT17** (optional, reviewer W2): needs the MSMT17 dataset —
-  `datasets/download_msmt17.py::ensure_msmt17` exists and can auto-download, but it's
-  Google-Drive only (no HTTP mirror fallback, unlike Market/Duke), so you may need to drop the
-  MSMT17 archive in `data/msmt17/` manually.
 
 ### Pretrained weights
 - **ImageNet-pretrained ViT-Base** (`jx_vit_base_p16_224-80ecf9dd.pth`). Referenced by

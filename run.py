@@ -38,7 +38,6 @@ sys.path.insert(0, str(REPO_DIR))
 from datasets.download_market1501 import ensure_market1501
 from datasets.download_duke import ensure_dukemtmcreid
 from datasets.build_occ_duke import ensure_occ_duke
-from datasets.download_msmt17 import ensure_msmt17
 REPO_ZIP_NAMES = ("TransReID-PEFT.zip", "transreid-peft.zip")
 WEIGHT_DIR = REPO_DIR / ".cache" / "torch" / "checkpoints"
 WEIGHT_FILE = WEIGHT_DIR / "jx_vit_base_p16_224-80ecf9dd.pth"
@@ -180,13 +179,6 @@ def setup(skip_smoke: bool = False, download_all_datasets: bool = False) -> None
         else:
             print("    Building Occluded-Duke dataset...")
             _try_dataset("Occluded-Duke", ensure_occ_duke, data_root, search_dirs)
-
-        msmt_dir = data_root / "MSMT17"
-        if (msmt_dir / "train").is_dir():
-            print("    MSMT17: OK")
-        else:
-            print("    Downloading MSMT17 dataset...")
-            _try_dataset("MSMT17", ensure_msmt17, data_root, search_dirs)
 
     if not skip_smoke:
         print("    Running smoke test...")
