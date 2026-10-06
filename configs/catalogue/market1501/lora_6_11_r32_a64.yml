@@ -1,0 +1,16 @@
+_BASE_: '../../base/market1501_transreid.yml'
+
+PEFT:
+  METHOD: 'lora'
+  LORA:
+    R: 32
+    ALPHA: 64
+    DROPOUT: 0.05
+    TARGETS: ['qkv', 'proj', 'fc1', 'fc2']
+    TRAIN_HEAD: True
+    MERGE_AT_EVAL: False
+    BIAS: "none"
+    SAVE_ADAPTER_ONLY: True
+    BLOCKS: [6, 7, 8, 9, 10, 11]
+
+OUTPUT_DIR: '../logs/catalogue_lora_6_11_r32_a64'

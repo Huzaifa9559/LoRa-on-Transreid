@@ -1,4 +1,4 @@
-_BASE_: '../base/market1501_transreid.yml'
+_BASE_: '../../base/market1501_transreid.yml'
 
 MODEL:
   JPM: False
@@ -7,10 +7,10 @@ PEFT:
   METHOD: 'ssf'
   SSF:
     ENABLED: True
-    BLOCKS: (4, 5, 6, 7, 8, 9, 10, 11)
+    BLOCKS: (6, 7, 8, 9, 10, 11)
     MERGE_ON_SAVE: False
     LR: 0.0
     FREEZE_BACKBONE: True
     OPTIMIZER_CASE: 1
 
-OUTPUT_DIR: '../logs/market_vit_transreid_ssf_4_11_case1'
+OUTPUT_DIR: '../logs/catalogue_ssf_6_11_case1'

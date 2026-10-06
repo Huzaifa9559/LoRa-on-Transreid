@@ -1,0 +1,13 @@
+_BASE_: '../../base/market1501_transreid.yml'
+
+PEFT:
+  METHOD: 'adapter'
+  ADAPTER:
+    ENABLED: True
+    R: 16
+    DROPOUT: 0.05
+    SCALE: 1.0
+    TARGETS: ["qkv", "proj", "fc1", "fc2"]
+    BLOCKS: [6, 7, 8, 9, 10, 11]
+
+OUTPUT_DIR: '../logs/catalogue_adapter_6_11_r16'

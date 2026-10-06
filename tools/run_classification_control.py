@@ -32,11 +32,11 @@ from solver.make_optimizer import make_optimizer
 from solver.scheduler_factory import create_scheduler
 
 CLASSIFICATION_CONFIGS = [
-    ("Full FT Baseline", "configs/classification/vit_transreid_full_ft.yml"),
-    ("LoRA 0–11 (r=8, α=16)", "configs/classification/lora_blocks_0_11_r8.yml"),
-    ("LoRA 4–11 (r=32, α=64)", "configs/classification/lora_blocks_4_11_r32.yml"),
-    ("LoRA 6–11 (r=16, α=32)", "configs/classification/lora_blocks_6_11_r16.yml"),
-    ("SSF 0–11 (Case 2)", "configs/classification/ssf_0_11_case2.yml"),
+    ("Full FT Baseline", "configs/exploratory/classification/vit_transreid_full_ft.yml"),
+    ("LoRA 0–11 (r=8, α=16)", "configs/exploratory/classification/lora_blocks_0_11_r8.yml"),
+    ("LoRA 4–11 (r=32, α=64)", "configs/exploratory/classification/lora_blocks_4_11_r32.yml"),
+    ("LoRA 6–11 (r=16, α=32)", "configs/exploratory/classification/lora_blocks_6_11_r16.yml"),
+    ("SSF 0–11 (Case 2)", "configs/exploratory/classification/ssf_0_11_case2.yml"),
 ]
 
 

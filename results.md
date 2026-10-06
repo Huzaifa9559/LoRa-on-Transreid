@@ -1,117 +1,100 @@
-# Experiment 4 Results — Lightweight PEFT Baselines on Market-1501
+# Configuration catalogue and results (Market-1501)
 
-All runs share the same frozen ViT-Base (TransReID) backbone, the same 60-epoch recipe
-(AdamW, softmax+triplet, JPM/SIE on, batch 64), and seed 1234. Runs were executed on a
-single RTX 3060 (12 GB) via `tools/run_experiment4.py`; peak VRAM and wall time are
-measured per run.
+Source of truth: the revised manuscript *Selecting Parameter-Efficient Fine-Tuning Configurations for Transformer-Based Person Re-Identification*.
 
-> Metric values are parsed from the per-run logs (`logs/experiment4/run_10_*.log`) with the
-> corrected Rank parser. Note: the first two rows of `progress.json` (bitfit_0_11, bitfit_4_11)
-> carry the pre-fix `R1` values (98.0 / 97.0) — those are **Rank-10**, not Rank-1. The values
-> below are authoritative.
+## Hardware and measurement
 
-## Configuration
+- Workstation: NVIDIA **RTX 4000 Ada (20 GB)**, Intel Core i7-14700, 32 GB RAM.
+- Seed: `SOLVER.SEED = 1234`.
+- Epoch budget: 60; evaluation at epoch 60. Reported PEFT scores are final-epoch results; no intermediate checkpoint was selected using test results.
+- **Adapter / BitFit / LN-tuning memory:** maximum sampled total GPU memory, sampled every five seconds, stored as `peak_vram_gib` (`peak MiB / 1024`). Unit: GiB.
+- **LoRA / SSF / full-fine-tuning memory:** recorded as displayed by the monitoring tool (unit basis not retained). Tables show values as recorded (**assumption A**). Under **assumption B** (decimal GB), values in GiB are 6.9% smaller (×0.931).
 
-### Shared recipe (inherited from `configs/base/market1501_transreid.yml`)
+## Shared PEFT recipe
+
+Inherited from [`configs/base/market1501_transreid.yml`](configs/base/market1501_transreid.yml) unless a row overrides it:
 
 | Setting | Value |
-|---|---|
-| Backbone | ViT-Base TransReID (12 blocks, frozen) |
-| Model | JPM on, SIE camera on (coefficient 3.0), BNNeck |
-| Image size | 256 × 128 (stride [12, 12]) |
-| Pretrained weights | ImageNet ViT-B (`jx_vit_base_p16_224-80ecf9dd.pth`) |
-| Optimizer | AdamW, base LR 3e-4, weight decay 0.05 |
-| Scheduler | Warmup 5 epochs + cosine decay, 60 epochs total |
-| Sampler / loss | softmax + triplet (no margin), label smoothing off |
-| Batch size | 64 (IMS_PER_BATCH) |
-| Dataloader workers | 4 |
-| Seed | 1234 |
-| Dataset | Market-1501 (751 train IDs, 750 query, 751 gallery) |
+|---------|-------|
+| Backbone | ViT-Base TransReID, stride `[12,12]`, 256×128 |
+| Head | JPM on, SIE camera 3.0, BNNeck (SSF rows: JPM off) |
+| Optimizer | AdamW, LR 3e-4, weight decay 0.05, warmup 5 + cosine |
+| Batch / instances | 64 images, 4 per identity |
+| Augmentation | flip, pad/crop, random erasing; **no colour jitter**; mean/std 0.5 |
+| Dataset | Market-1501 |
 
-### PEFT method settings (overrides on top of the base recipe)
+SSF Case 2 additionally sets LR 3.5e-4, weight decay 1e-4, bias LR factor 2. SSF and BitFit trainable biases / SSF vectors use 10× base LR and weight decay 0 in the released optimizer.
 
-Each config sets `PEFT.METHOD` plus its method node; only the matching node is enabled.
+## Parameter accounting
 
-| Method | Config node | Settings |
-|---|---|---|
-| BitFit | `PEFT.BITFIT` | `ENABLED: True`, `BLOCKS: []` \| `[4..11]` \| `[6..11]`. Trains all bias params (Linear biases + LayerNorm β) in the active blocks; head always trainable. Biases get **10× base LR, weight decay 0** (SSF-consistent rule in `make_optimizer`). |
-| LN-tuning | `PEFT.LNTUNE` | `ENABLED: True`, `BLOCKS: []` \| `[4..11]` \| `[6..11]`, `TRAIN_FINAL_NORM: True`. Trains LayerNorm γ/β only (incl. final `base.norm`) in the active blocks; head trainable. |
-| Bottleneck adapter | `PEFT.ADAPTER` | `ENABLED: True`, `R: 16`, `DROPOUT: 0.05`, `SCALE: 1.0`, `TARGETS: ["qkv","proj","fc1","fc2"]`, `BLOCKS: []` \| `[4..11]` \| `[6..11]`. Parallel `down → GELU → up` (r=16) wrapping each target Linear; down kaiming-init, up **zero-init** (identity at init); base weights frozen. |
+PEFT adaptation parameters (analytic, registered):
 
-All three freeze the backbone and keep the Re-ID head (classifier + BNNeck) trainable; JPM
-branches (`b1`/`b2`) stay frozen, matching the LoRA treatment.
+| Family | Formula |
+|--------|---------|
+| LoRA / Adapter | `P = 12288 · n · r` |
+| SSF | `P = 6144 · n + 3072` |
+| BitFit | `P = 8448 · n + 1536` |
+| LN-tuning | `P = 3072 · n + 1536` |
 
-### Config files
+`n` is the number of blocks in the **configured** window. With JPM enabled, block 11 and the original final LayerNorm are registered but unused; counts stay registered. Head parameters are separate: JPM five-classifier head 2,883,840 (+ 7,680 BNNeck affine if counted); BitFit also trains five BNNeck biases; SSF uses a single classifier (+ BNNeck scale).
 
-| Method | Depth window | File |
-|---|---|---|
-| BitFit | 0–11 | `configs/Market/bitfit_blocks_0_11.yml` |
-| BitFit | 4–11 | `configs/Market/bitfit_blocks_4_11.yml` |
-| BitFit | 6–11 | `configs/Market/bitfit_blocks_6_11.yml` |
-| LN-tuning | 0–11 | `configs/Market/lntune_blocks_0_11.yml` |
-| LN-tuning | 4–11 | `configs/Market/lntune_blocks_4_11.yml` |
-| LN-tuning | 6–11 | `configs/Market/lntune_blocks_6_11.yml` |
-| Adapter | 0–11 | `configs/Market/adapter_blocks_0_11_r16.yml` |
-| Adapter | 4–11 | `configs/Market/adapter_blocks_4_11_r16.yml` |
-| Adapter | 6–11 | `configs/Market/adapter_blocks_6_11_r16.yml` |
+## Config-to-result mapping
 
-**How to reproduce:**
+Command for every row:
 
 ```bash
-# local smoke (CPU): one config at a time
-python tools/check_peft.py --config_file configs/Market/adapter_blocks_0_11_r16.yml --cpu-only
+python train.py --config_file configs/catalogue/market1501/<file>
+```
 
-# full 9-run sweep (sequential, resumable, logs in logs/experiment4/)
+| # | Family | Blocks / setting | mAP | R-1 | Memory | P (M) | Config file | Effective overrides |
+|---|--------|------------------|----:|----:|--------|------:|-------------|---------------------|
+| 1 | Full FT reference | 0–11 | 88.0 | 94.4 | 11.5 (A) | all | *(no recovered YAML)* | 60-epoch reference; optimizer settings not retained. Public 120-epoch SGD: `configs/Market/vit_transreid_stride.yml`. PEFT AdamW with `METHOD: none`: `full_ft_public_120epoch_sgd_NOTE.yml` (labelled as not historical). |
+| 2 | LoRA | 0–11, r8 α16 | 85.8 | 93.5 | 11.4 (A) | 1.18 | `lora_0_11_r8_a16.yml` | `R=8 ALPHA=16 BLOCKS=[]` |
+| 3 | LoRA | 0–11, r16 α16 | 75.5 | 88.5 | 10.6 (A) | 2.36 | `lora_0_11_r16_a16.yml` | `R=16 ALPHA=16` |
+| 4 | LoRA | 0–11, r16 α32 | 74.0 | 87.6 | 11.0 (A) | 2.36 | `lora_0_11_r16_a32.yml` | `R=16 ALPHA=32` |
+| 5 | LoRA | 4–11, r8 α16 | 80.5 | 91.5 | 8.03 (A) | 0.79 | `lora_4_11_r8_a16.yml` | `BLOCKS=[4..11] R=8 ALPHA=16` |
+| 6 | LoRA | 4–11, r16 α32 | 82.1 | 92.4 | 8.34 (A) | 1.57 | `lora_4_11_r16_a32.yml` | `R=16 ALPHA=32` |
+| 7 | LoRA | 4–11, r16 α48 | 82.7 | 92.5 | 8.01 (A) | 1.57 | `lora_4_11_r16_a48.yml` | `R=16 ALPHA=48` |
+| 8 | LoRA | 4–11, r32 α64 | 83.2 | 92.8 | 7.84 (A) | 3.15 | `lora_4_11_r32_a64.yml` | Same as legacy `configs/Market/vit_transreid_stride_lora_blocks_6_11.yml` (misnamed; blocks **4–11**) |
+| 9 | LoRA | 6–11, r8 α16 | 74.8 | 88.2 | 7.60 (A) | 0.59 | `lora_6_11_r8_a16.yml` | `BLOCKS=[6..11]` |
+| 10 | LoRA | 6–11, r16 α16 | 75.3 | 89.2 | 6.90 (A) | 1.18 | `lora_6_11_r16_a16.yml` | |
+| 11 | LoRA | 6–11, r16 α32 | 77.4 | 90.1 | 7.59 (A) | 1.18 | `lora_6_11_r16_a32.yml` | |
+| 12 | LoRA | 6–11, r16 α32 attn-only | 74.6 | 88.5 | 7.06 (A) | 0.44 | `lora_6_11_r16_a32_attn_only.yml` | `TARGETS=[qkv,proj]` |
+| 13 | LoRA | 6–11, r16 α64 | 63.4 | 81.9 | 7.00 (A) | 1.18 | `lora_6_11_r16_a64.yml` | α/r=4; single such run |
+| 14 | LoRA | 6–11, r32 α64 | 78.9 | 90.6 | 7.06 (A) | 2.36 | `lora_6_11_r32_a64.yml` | |
+| 15 | SSF | 0–11 Case 1 | 79.7 | 91.0 | 10.1 (A) | 0.077 | `ssf_0_11_case1.yml` | `JPM=False OPTIMIZER_CASE=1` |
+| 16 | SSF | 0–11 Case 2 | 79.9 | 91.1 | 10.0 (A) | 0.077 | `ssf_0_11_case2.yml` | `JPM=False OPTIMIZER_CASE=2` |
+| 17 | SSF | 4–11 Case 1 | 74.1 | 88.0 | 9.43 (A) | 0.052 | `ssf_4_11_case1.yml` | |
+| 18 | SSF | 4–11 Case 2 | 74.5 | 88.0 | 9.45 (A) | 0.052 | `ssf_4_11_case2.yml` | |
+| 19 | SSF | 6–11 Case 1 | 68.5 | 84.3 | 9.18 (A) | 0.040 | `ssf_6_11_case1.yml` | |
+| 20 | SSF | 6–11 Case 2 | 68.9 | 84.7 | 9.25 (A) | 0.040 | `ssf_6_11_case2.yml` | |
+| 21 | BitFit | 0–11 | 76.6 | 89.8 | 6.51 GiB | 0.103 | `bitfit_0_11.yml` | |
+| 22 | BitFit | 4–11 | 69.4 | 85.1 | 6.51 GiB | 0.069 | `bitfit_4_11.yml` | |
+| 23 | BitFit | 6–11 | 61.2 | 79.8 | 6.51 GiB | 0.052 | `bitfit_6_11.yml` | |
+| 24 | LN-tuning | 0–11 | 65.9 | 83.7 | 6.51 GiB | 0.038 | `lntune_0_11.yml` | |
+| 25 | LN-tuning | 4–11 | 57.7 | 78.4 | 4.83 GiB | 0.026 | `lntune_4_11.yml` | |
+| 26 | LN-tuning | 6–11 | 48.0 | 71.5 | 3.99 GiB | 0.020 | `lntune_6_11.yml` | |
+| 27 | Adapter | 0–11 r16 | 85.9 | 93.7 | 8.03 GiB | 2.36 | `adapter_0_11_r16.yml` | |
+| 28 | Adapter | 4–11 r16 | 80.5 | 90.8 | 5.77 GiB | 1.57 | `adapter_4_11_r16.yml` | |
+| 29 | Adapter | 6–11 r16 | 74.8 | 87.8 | 4.67 GiB | 1.18 | `adapter_6_11_r16.yml` | |
+
+Wall-clock time was recorded only for adapter / BitFit / LN-tuning (see manuscript Table 4). Rank-10 was not retained for SSF.
+
+## Batch runner (adapter / BitFit / LN-tuning)
+
+```bash
 python tools/run_experiment4.py
 ```
 
-## Full results
+Logs under `logs/experiment4/`. Progress field `peak_vram_gib` is the GiB sample described above.
 
-| Method | Depth window | mAP | R1 | R5 | R10 | Trainable params | Peak VRAM | Wall time |
-|---|---|---|---|---|---|---|---|---|
-| BitFit | 0–11 | 76.6 | 89.8 | 96.6 | 98.0 | 2.89% (2.99M) | 6.51 GB | ~95 min |
-| BitFit | 4–11 | 69.4 | 85.1 | 94.7 | 97.0 | 2.85% (2.96M) | 6.51 GB | ~94 min |
-| BitFit | 6–11 | 61.2 | 79.8 | 92.1 | 95.5 | 2.84% (2.94M) | 6.51 GB | ~93 min |
-| LN-tuning | 0–11 | 65.9 | 83.7 | 94.8 | 96.8 | 2.82% (2.92M) | 6.51 GB | ~93 min |
-| LN-tuning | 4–11 | 57.7 | 78.4 | 90.9 | 94.5 | 2.81% (2.91M) | 4.83 GB | ~78 min |
-| LN-tuning | 6–11 | 48.0 | 71.5 | 87.0 | 91.4 | 2.80% (2.90M) | 3.99 GB | ~71 min |
-| Bottleneck adapter (r=16) | 0–11 | **85.9** | **93.7** | 97.8 | 98.8 | 4.95% (5.24M) | 8.03 GB | ~117 min |
-| Bottleneck adapter (r=16) | 4–11 | 80.5 | 90.8 | 97.2 | 98.3 | 4.24% (4.46M) | 5.77 GB | ~93 min |
-| Bottleneck adapter (r=16) | 6–11 | 74.8 | 87.8 | 95.8 | 97.6 | 3.88% (4.06M) | 4.67 GB | ~82 min |
+## Code links
 
-Reference points from the existing LoRA/SSF study (same backbone, same recipe):
+| Component | Location |
+|-----------|----------|
+| LoRA, adapter, BitFit, LN-tuning | this repository (`model/peft/`) |
+| SSF companion (publication) | [TameemaRehman/SSF_TransReID](https://github.com/TameemaRehman/SSF_TransReID) |
+| In-repo SSF (reviewer convenience) | `model/peft/ssf.py` + catalogue `ssf_*.yml` |
+| Fixed integrated release | tag `peft-catalogue-v1` on this repository (created at integration) |
 
-| Method | Depth window | mAP | R1 | Trainable params | Peak VRAM |
-|---|---|---|---|---|---|
-| Full fine-tuning | 0–11 | 88.0 | 94.4 | 100% | 11.5 GB |
-| LoRA (r=32, α=64) | 4–11 | 82–83 | — | ~4.1% | ~7.8 GB |
-| SSF (Case 2) | 0–11 | 79.9 | 91.1 | ~2.83% | ~10.0 GB |
-
-## Key findings
-
-1. **Bottleneck adapters are the strongest lightweight method.** Adapter 0–11 (r=16) reaches
-   **85.9 mAP / 93.7 R1** — within ~2 mAP of full fine-tuning (88.0) at only **4.95% trainable
-   parameters**. This beats LoRA 0–11 r8 (~82–83) and SSF 0–11 (79.9), making adapters the new
-   frontier point for accuracy-vs-efficiency.
-2. **Depth placement is the dominant factor for all three methods** (0–11 → 4–11 → 6–11):
-   - BitFit: 76.6 → 69.4 → 61.2 mAP
-   - LN-tuning: 65.9 → 57.7 → 48.0 mAP
-   - Adapter: 85.9 → 80.5 → 74.8 mAP
-   This matches the pattern already established for LoRA and SSF.
-3. **Method ranking at full depth (0–11):** Adapter (85.9) ≫ BitFit (76.6) > LN-tuning (65.9).
-   Learned bottleneck transformations on frozen features substantially outperform tuning only
-   existing bias or LayerNorm parameters.
-4. **Peak VRAM varies by method** (frozen-backbone activations + trainable graph size):
-   adapter 0–11 = 8.03 GB (largest), LN-tuning 6–11 = 3.99 GB (smallest). All fit a 12 GB GPU
-   at batch 64.
-
-## Notes
-
-- **Configs:** `configs/Market/bitfit_blocks_*.yml`, `lntune_blocks_*.yml`,
-  `adapter_blocks_*_r16.yml`.
-- **Runner:** `tools/run_experiment4.py` (sequential, resumable; logs in `logs/experiment4/`).
-- **Implementation:** `model/peft/lightweight.py` (BitFit / LN-tuning freeze sweeps,
-  `BottleneckAdapter`), dispatched in `model/make_model.py`.
-- BitFit biases are trained at 10× base LR with zero weight decay (SSF-consistent). Adapter is a
-  parallel bottleneck (down → GELU → up) at the same targets as LoRA (`qkv, proj, fc1, fc2`),
-  r=16, up-projection zero-initialized (identity at init).
+Exploratory configs under `configs/exploratory/` are excluded from the manuscript catalogue.

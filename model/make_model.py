@@ -15,6 +15,7 @@ from model.peft.lightweight import (
 from model.peft.lora import (
     inject_lora_into_vit,
     load_lora_state_dict,
+    load_prediction_state,
     mark_trainable_lora_and_head,
     maybe_merge_lora,
 )
@@ -76,14 +77,31 @@ def _freeze_non_ssf(named_params):
 
 def _load_checkpoint_state(module, trained_path):
     param_dict = torch.load(trained_path, map_location='cpu')
-    if 'adapters' in param_dict:
-        load_lora_state_dict(module, param_dict['adapters'], strict=False)
-        print(f'Loaded LoRA adapters from {trained_path}')
+    if isinstance(param_dict, dict) and 'adapters' in param_dict:
+        missing, unexpected = load_lora_state_dict(
+            module, param_dict['adapters'], strict=False
+        )
+        if 'prediction_state' in param_dict:
+            load_prediction_state(module, param_dict['prediction_state'], strict=False)
+        meta = param_dict.get('meta', {})
+        print(
+            f"Loaded LoRA adapter export from {trained_path} "
+            f"(meta={meta}, missing={len(missing)}, unexpected={len(unexpected)})"
+        )
         return
-    if 'state_dict' in param_dict:
+    if isinstance(param_dict, dict) and 'state_dict' in param_dict:
         param_dict = param_dict['state_dict']
-    for i in param_dict:
-        module.state_dict()[i.replace('module.', '')].copy_(param_dict[i])
+    own = module.state_dict()
+    for key, value in param_dict.items():
+        key = key.replace('module.', '')
+        if key not in own:
+            continue
+        if tuple(own[key].shape) != tuple(value.shape):
+            raise RuntimeError(
+                f"Shape mismatch for {key}: model {tuple(own[key].shape)} "
+                f"vs checkpoint {tuple(value.shape)}"
+            )
+        own[key].copy_(value)
     print('Loading pretrained model from {}'.format(trained_path))
 
 

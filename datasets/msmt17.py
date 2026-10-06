@@ -26,15 +26,7 @@ class MSMT17(BaseImageDataset):
     def __init__(self, root='', verbose=True, pid_begin=0, **kwargs):
         super(MSMT17, self).__init__()
         self.pid_begin = pid_begin
-        candidate_upper = osp.join(root, 'MSMT17')
-        candidate_lower = osp.join(root, 'msmt17')
-        if osp.exists(candidate_upper):
-            self.dataset_dir = candidate_upper
-        elif osp.exists(candidate_lower):
-            self.dataset_dir = candidate_lower
-        else:
-            self.dataset_dir = candidate_upper
-
+        self.dataset_dir = osp.join(root, self.dataset_dir)
         self.train_dir = osp.join(self.dataset_dir, 'train')
         self.test_dir = osp.join(self.dataset_dir, 'test')
         self.list_train_path = osp.join(self.dataset_dir, 'list_train.txt')

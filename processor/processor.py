@@ -11,7 +11,7 @@ from utils.metrics import R1_mAP_eval
 import torch.distributed as dist
 
 from config.peft_config import get_peft_method
-from model.peft.lora import lora_state_dict
+from model.peft.lora import build_adapter_checkpoint
 
 
 def _resolve_device(cfg) -> torch.device:
@@ -52,14 +52,25 @@ def _save_checkpoint(cfg, model, epoch):
     model_to_save = model.module if hasattr(model, "module") else model
 
     if get_peft_method(cfg) == "lora" and cfg.PEFT.LORA.SAVE_ADAPTER_ONLY:
-        # Save only LoRA adapters
-        state_dict = lora_state_dict(model_to_save)
-        torch.save({"adapters": state_dict}, checkpoint_path)
+        # Adapter export (adapters + prediction state + metadata). Not a resume checkpoint.
+        payload = build_adapter_checkpoint(model_to_save, cfg)
+        torch.save(payload, checkpoint_path)
         logger = logging.getLogger("transreid.train")
-        logger.info(f"Saved LoRA adapters only to {checkpoint_path} ({len(state_dict)} adapter tensors)")
+        logger.info(
+            f"Saved LoRA adapter export to {checkpoint_path} "
+            f"({len(payload['adapters'])} adapter tensors, "
+            f"{len(payload['prediction_state'])} prediction tensors)"
+        )
     else:
-        # Save full model state dict
-        torch.save(model_to_save.state_dict(), checkpoint_path)
+        # Full training-resume checkpoint
+        torch.save(
+            {
+                "format": "full_resume_v1",
+                "state_dict": model_to_save.state_dict(),
+                "epoch": epoch,
+            },
+            checkpoint_path,
+        )
 
 
 def do_train(

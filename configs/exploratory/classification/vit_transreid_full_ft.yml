@@ -1,4 +1,4 @@
-_BASE_: '../base/classification_transreid.yml'
+_BASE_: '../classification_transreid.yml'
 
 PEFT:
   METHOD: 'none'

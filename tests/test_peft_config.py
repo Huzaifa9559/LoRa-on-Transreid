@@ -10,13 +10,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from config import cfg, normalize_peft_config
 
 
-def test_mutual_exclusion_raises():
+def test_method_authoritative_clears_stale_flags():
+    """METHOD wins over ENABLED flags left by a previous yacs merge."""
     cfg_copy = cfg.clone()
     cfg_copy.defrost()
     cfg_copy.PEFT.METHOD = "lora"
     cfg_copy.PEFT.SSF.ENABLED = True
-    with pytest.raises(ValueError, match="more than one PEFT method"):
-        normalize_peft_config(cfg_copy)
+    normalize_peft_config(cfg_copy)
+    assert cfg_copy.PEFT.METHOD == "lora"
+    assert cfg_copy.PEFT.SSF.ENABLED is False
 
 
 def test_legacy_lora_enabled_maps_to_method():
@@ -77,5 +79,6 @@ def test_lightweight_mutual_exclusion():
     cfg_copy.defrost()
     cfg_copy.PEFT.METHOD = "bitfit"
     cfg_copy.PEFT.SSF.ENABLED = True
-    with pytest.raises(ValueError, match="more than one PEFT method"):
-        normalize_peft_config(cfg_copy)
+    normalize_peft_config(cfg_copy)
+    assert cfg_copy.PEFT.METHOD == "bitfit"
+    assert cfg_copy.PEFT.SSF.ENABLED is False

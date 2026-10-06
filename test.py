@@ -1,5 +1,5 @@
 import os
-from config import cfg
+from config import cfg, merge_config_file, normalize_peft_config
 import argparse
 from datasets import make_dataloader
 from model import make_model
@@ -20,8 +20,9 @@ if __name__ == "__main__":
 
 
     if args.config_file != "":
-        cfg.merge_from_file(args.config_file)
+        merge_config_file(cfg, args.config_file)
     cfg.merge_from_list(args.opts)
+    normalize_peft_config(cfg)
     cfg.freeze()
 
     output_dir = cfg.OUTPUT_DIR

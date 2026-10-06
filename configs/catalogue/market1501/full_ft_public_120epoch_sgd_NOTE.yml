@@ -1,0 +1,16 @@
+# NOTE (not a recovered manuscript recipe):
+# The paper's 60-epoch full-fine-tuning reference (88.0 mAP / 94.4 Rank-1) has
+# incompletely documented optimizer settings. This file points reviewers at the
+# public TransReID 120-epoch SGD configuration only. Do not treat it as the
+# PEFT AdamW recipe or as the unrecovered 60-epoch reference.
+#
+# Run instead:
+#   python train.py --config_file configs/Market/vit_transreid_stride.yml
+#
+# Or use the PEFT base with METHOD none (shared AdamW recipe; not the historical reference):
+_BASE_: '../../base/market1501_transreid.yml'
+
+PEFT:
+  METHOD: 'none'
+
+OUTPUT_DIR: '../logs/catalogue_full_ft_peft_adamw_recipe_not_historical_reference'

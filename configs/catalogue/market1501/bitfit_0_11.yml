@@ -1,0 +1,9 @@
+_BASE_: '../../base/market1501_transreid.yml'
+
+PEFT:
+  METHOD: 'bitfit'
+  BITFIT:
+    ENABLED: True
+    BLOCKS: []
+
+OUTPUT_DIR: '../logs/catalogue_bitfit_0_11'

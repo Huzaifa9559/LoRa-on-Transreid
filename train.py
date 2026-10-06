@@ -11,7 +11,7 @@ import numpy as np
 import os
 import argparse
 # from timm.scheduler import create_scheduler
-from config import cfg
+from config import cfg, merge_config_file, normalize_peft_config
 
 def set_seed(seed):
     torch.manual_seed(seed)
@@ -35,8 +35,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.config_file != "":
-        cfg.merge_from_file(args.config_file)
+        merge_config_file(cfg, args.config_file)
     cfg.merge_from_list(args.opts)
+    normalize_peft_config(cfg)
     cfg.freeze()
 
     set_seed(cfg.SOLVER.SEED)

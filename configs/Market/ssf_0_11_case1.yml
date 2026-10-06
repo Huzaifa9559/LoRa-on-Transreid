@@ -1,5 +1,8 @@
 _BASE_: '../base/market1501_transreid.yml'
 
+MODEL:
+  JPM: False
+
 PEFT:
   METHOD: 'ssf'
   SSF:

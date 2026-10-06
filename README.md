@@ -1,223 +1,171 @@
 ![Python >=3.8](https://img.shields.io/badge/Python->=3.8-yellow.svg)
 ![PyTorch >=1.6](https://img.shields.io/badge/PyTorch->=1.6-blue.svg)
-![PEFT](https://img.shields.io/badge/PEFT-LoRA%20%7C%20SSF%20%7C%20Adapter-green.svg)
+![PEFT](https://img.shields.io/badge/PEFT-catalogue-green.svg)
 ![Task](https://img.shields.io/badge/Task-Person%20Re--ID-orange.svg)
 
-# PEFT-on-ReID: Parameter-Efficient Fine-Tuning for Person Re-Identification on Vision Transformers
+# PEFT on TransReID — Configuration Catalogue for ViT Person Re-ID
 
-This repository is a research fork of the official [**TransReID**](https://github.com/damo-cv/TransReID) codebase, extended with multiple parameter-efficient fine-tuning (PEFT) methods for the ViT-Base backbone.
+Research fork of [**TransReID**](https://github.com/damo-cv/TransReID) with five parameter-efficient fine-tuning (PEFT) families on the ViT-Base backbone:
 
-> **PEFT-on-ReID: Parameter-Efficient Fine-Tuning for Person Re-Identification on Vision Transformers**
-> Huzaifa Naseer, Tameema Rehman, Anas Ashfaq, Farrukh Hasan Syed
-> *Department of Computer Science, FAST-NUCES, Karachi, Pakistan*
+> **Selecting Parameter-Efficient Fine-Tuning Configurations for Transformer-Based Person Re-Identification**
+> Huzaifa Naseer, Tameema Rehman, Anas Ashfaq, Muhammad Taaha, Farrukh Hasan Syed
 
----
+Every manuscript PEFT row is a single YAML under [`configs/catalogue/market1501/`](configs/catalogue/market1501/). The same command runs any method; only the config file changes.
 
-## 1. Overview
+```bash
+python train.py --config_file configs/catalogue/market1501/<row>.yml
+python test.py  --config_file configs/catalogue/market1501/<row>.yml TEST.WEIGHT <checkpoint>
+```
 
-Vision Transformer (ViT) backbones such as TransReID achieve strong performance for person re-identification (Re-ID), but full fine-tuning is expensive in memory and compute. Parameter-efficient fine-tuning (PEFT) addresses this by freezing the backbone and learning a small set of task-specific parameters. We conduct a systematic comparison of five structurally distinct PEFT methods on TransReID evaluated under the standard Market-1501 protocol.
+Companion SSF publication code (separate fork used for the reported SSF numbers): [TameemaRehman/SSF_TransReID](https://github.com/TameemaRehman/SSF_TransReID). This repository also includes an in-repo SSF path so reviewers can launch SSF from the same command; a bit-exact numerical match to the companion fork was not re-verified here.
 
-### Contributions
-
-1. **Systematic PEFT Comparison:** We evaluate weight-matrix updates (LoRA), activation-affine transformations (SSF), parallel bottleneck adapters, and lightweight parameter tuning (BitFit, LN-tuning) on a frozen ViT-Base backbone.
-2. **Classification Control (Framing 6):** We evaluate PEFT methods under pure Softmax Cross-Entropy classification, as a control suggesting that the PEFT accuracy gap in Re-ID is related to the metric-learning objective rather than solely to backbone capacity (single seed, Market-1501; the loss is not isolated, so this is a hypothesis).
-3. **Automated Reproducibility:** Diagnostic inspectors, unit test suites, and automated benchmark runners enable full replication of all reported metrics.
+Full result tables, parameter accounting, and config-to-result mapping: [`results.md`](results.md).
 
 ---
 
-## 2. PEFT Paradigms & Formulations
+## 1. What this repository provides
 
-Within each adapted transformer block:
+| Method | Config key | Implementation |
+|--------|------------|----------------|
+| LoRA | `PEFT.METHOD: lora` | [`model/peft/lora.py`](model/peft/lora.py) |
+| Bottleneck adapter | `PEFT.METHOD: adapter` | [`model/peft/lightweight.py`](model/peft/lightweight.py) |
+| BitFit | `PEFT.METHOD: bitfit` | [`model/peft/lightweight.py`](model/peft/lightweight.py) |
+| LayerNorm tuning | `PEFT.METHOD: lntune` | [`model/peft/lightweight.py`](model/peft/lightweight.py) |
+| SSF | `PEFT.METHOD: ssf` | [`model/peft/ssf.py`](model/peft/ssf.py) + ViT hooks |
+| Full fine-tuning | `PEFT.METHOD: none` | all weights trainable |
 
-- **LoRA:** Injects low-rank decomposition matrices $W' = W + \frac{\alpha}{r}BA$ into linear projections `{qkv, proj, fc1, fc2}`.
-- **SSF:** Applies per-channel scale and shift $y = \gamma \odot x + \beta$ post-activation after Attention, MLP, LayerNorm1, and LayerNorm2. Supports zero-FLOPs inference reparameterization.
-- **Bottleneck Adapters:** Parallel bottleneck blocks $y = x + W_{up} \text{GELU}(W_{down} x)$ wrapping target linear layers ($r=16$, down Kaiming-init, up zero-init).
-- **BitFit & LN-Tuning:** Freezes all backbone weights while training bias terms or LayerNorm parameters ($\gamma, \beta$) respectively.
+Shared Market-1501 PEFT recipe: [`configs/base/market1501_transreid.yml`](configs/base/market1501_transreid.yml) (ViT-Base, stride `[12,12]`, 256×128, SIE camera 3.0, AdamW 3e-4, weight decay 0.05, 5 warm-up epochs, cosine, batch 64, seed 1234, 60 epochs, evaluation at epoch 60, mean/std 0.5). The dataloader applies resize, flip, pad/crop, normalize, and random erasing; there is no colour jitter.
 
-The backbone weights, patch embeddings, Side-Information Embeddings (SIE), and Jigsaw Patch Module (JPM) parameters remain frozen; PEFT modules, LayerNorm parameters, and the Re-ID head remain trainable.
-
----
-
-## 3. Configuration Space
-
-The PEFT sweep is driven entirely from YAML (`configs/Market/`, `configs/classification/`).
-
-| Axis | Values | Notes |
-|------|--------|-------|
-| **PEFT Method** | `lora`, `ssf`, `adapter`, `bitfit`, `lntune` | Selected via `PEFT.METHOD` |
-| **Depth (blocks)** | `0–11`, `4–11`, `6–11` | Controlled via `BLOCKS` array; empty = all 12 blocks |
-| **LoRA Rank $r$** | `8, 16, 32` | `PEFT.LORA.R`; recipe favors $\alpha \approx 2r$ |
-| **LoRA Scaling $\alpha$** | `16, 32, 48, 64` | `PEFT.LORA.ALPHA` |
-| **Adapter Bottleneck $r$** | `16` | Parallel bottleneck dimension (`PEFT.ADAPTER.R`) |
-| **Module targets** | `{qkv, proj, fc1, fc2}` | Attention + MLP default targets |
-
-Reference baseline: **full fine-tuning** (`PEFT.METHOD: 'none'`), all TransReID weights trainable.
+Legacy LoRA YAMLs that set `LORA.ENABLED: True` still work: `normalize_peft_config` copies them into `PEFT.LORA` and sets `PEFT.METHOD` to `lora`.
 
 ---
 
-## 4. Key Results (Market-1501)
+## 2. Key results (Market-1501)
 
-### 4.1. Standard Person Re-ID Protocol
+Hardware for all reported runs: **NVIDIA RTX 4000 Ada (20 GB)**, Intel Core i7-14700, 32 GB RAM. Single seed 1234. PEFT scores are final-epoch results after 60 epochs; no intermediate checkpoint was selected on the test set.
 
-All runs: single NVIDIA GPU, 60 epochs, AdamW, cosine decay, batch size 64, a single fixed seed (`1234`, no repeated runs). Evaluated on Market-1501 under single-query protocol. `ΔmAP` denotes absolute gap from Full FT baseline.
+| Family | Setting | mAP | Rank-1 | Memory | PEFT params P (M) |
+|--------|---------|----:|-------:|--------|------------------:|
+| Full-fine-tuning reference | 60-epoch reference | **88.0** | **94.4** | 11.5 (assumption A) | all |
+| Bottleneck adapter | 0–11, r=16 | **85.9** | **93.7** | **8.03 GiB** | 2.36 |
+| LoRA | 0–11, r=8, α=16 | **85.8** | **93.5** | 11.4 (assumption A) | 1.18 |
+| LoRA | 4–11, r=32, α=64 | 83.2 | 92.8 | 7.84 (assumption A) | 3.15 |
+| SSF | 0–11, Case 2, JPM off | 79.9 | 91.1 | 10.0 (assumption A) | 0.077 |
+| BitFit | 0–11 | 76.6 | 89.8 | 6.51 GiB | 0.103 |
+| LayerNorm tuning | 0–11 | 65.9 | 83.7 | 6.51 GiB | 0.038 |
 
-| Blocks | Method | Config / Hyperparams | mAP | Rank-1 | Rank-5 | Rank-10 | GPU (GB) | Params (%) | ΔmAP |
-|:------:|:------:|:--------------------:|:---:|:------:|:------:|:-------:|:--------:|:----------:|:----:|
-| **Baseline (Full FT)** | Full FT | — | **88.0** | **94.4** | 98.2 | 99.0 | 11.5 | 100.0% | — |
-| **0–11** | **Bottleneck Adapter** | r=16 | **85.9** | **93.7** | 97.8 | 98.8 | **8.03** | 4.95% | **−2.1** |
-| 0–11 | LoRA | r=8, α=16 | 85.8 | 93.5 | 98.0 | 98.9 | 11.4 | 1.99% | −2.2 |
-| **4–11** | **LoRA** | **r=32, α=64** | **83.2** | **92.8** | 97.8 | 98.5 | **7.84** | **4.12%** | **−4.8** |
-| 4–11 | Bottleneck Adapter | r=16 | 80.5 | 90.8 | 97.2 | 98.3 | 5.77 | 4.24% | −7.5 |
-| 0–11 | SSF | Case 2 | 79.9 | 91.1 | 97.1 | 98.1 | 10.0 | 2.83% | −8.1 |
-| 0–11 | BitFit | — | 76.6 | 89.8 | 96.6 | 98.0 | 6.51 | 2.89% | −11.4 |
-| 0–11 | LN-Tuning | — | 65.9 | 83.7 | 94.8 | 96.8 | 6.51 | 2.82% | −22.1 |
+Adapter 0–11 (85.9) and LoRA 0–11 r8 α16 (85.8) are within the paper’s 1.0 mAP reporting tolerance. Comparisons use **PEFT-only registered counts** (Section 4.7); trainable head parameters are reported separately in [`results.md`](results.md).
 
-### 4.2. Classification Control Results (Framing 6)
+**Memory units.** Adapter, BitFit, and LN-tuning values are the maximum sampled total GPU memory, sampled every five seconds, converted MiB→GiB by dividing by 1024. LoRA, SSF, and full-fine-tuning values are shown as recorded (assumption A). Under assumption B (decimal GB display), those three families’ values in GiB are 6.9% smaller.
 
-Evaluated under Softmax Cross-Entropy loss directly on global ViT features (`NECK: 'no'`), removing pairwise metric learning losses. Single seed, Market-1501 only. Memory is lower than in Section 4.1 because BNNeck, JPM and SIE are disabled, so GPU figures are not comparable across the two tables.
-
-| Configuration | Method | Block Coverage | Trainable Params (%) | GPU (GB) | mAP (%) | Rank-1 (%) | Rank-5 (%) |
-|:-------------:|:------:|:--------------:|:--------------------:|:--------:|:-------:|:----------:|:----------:|
-| Full FT Baseline | Full FT | 0–11 | 100.00% | 7.91 | 80.5 | 92.1 | 97.5 |
-| **LoRA 0–11 (r=8, α=16)** | LoRA | 0–11 | **1.99%** | 8.14 | **82.0** | **92.6** | **98.0** |
-| LoRA 4–11 (r=32, α=64) | LoRA | 4–11 | 4.12% | 5.68 | 79.6 | 90.7 | 97.0 |
-| LoRA 6–11 (r=16, α=32) | LoRA | 6–11 | 1.99% | 4.39 | 72.8 | 88.0 | 95.9 |
-| SSF 0–11 (Case 2) | SSF | 0–11 | 2.83% | 9.38 | 74.0 | 89.4 | 97.0 |
-
-### Takeaways
-
-- **Bottleneck Adapters reach near-baseline accuracy.** `0–11` adapter ($r=16$) achieves **85.9% mAP / 93.7% Rank-1** — within ~2 mAP of full fine-tuning at only 4.95% trainable parameters.
-- **Depth placement dominates.** `4–11` LoRA ($r=32, \alpha=64$) is the best accuracy–memory compromise: **mAP 83.2% at 7.84 GB VRAM — a ~30% memory reduction.**
-- **Classification control suggests an objective effect.** Under pure classification loss, LoRA 0–11 ($r=8$) scores **+1.5% mAP over Full FT (82.0% vs. 80.5%)**. This is consistent with the PEFT gap in Re-ID depending on the metric-learning objective, but it comes from a single seed and does not isolate the triplet loss, so it is not conclusive.
-
-### Practical Guidelines
-
-| Constraint | Recommended config | Expected outcome |
-|------------|--------------------|------------------|
-| Maximize accuracy | Full FT or `0–11` Adapter $r=16$ | Full FT: mAP ≈ 88%, 11.5 GB; Adapter: mAP ≈ 85.9%, 8.03 GB |
-| ~30% VRAM savings | `4–11` LoRA, $r=32$, $\alpha=64$ | mAP ≈ 83.2%, 7.84 GB VRAM |
-| Min. trainable params | `0–11` SSF (Case 2) | mAP ≈ 79.9%, ~2.83% params |
-| Tight GPU (~7 GB) | `6–11` LoRA ($r=16–32$, $\alpha \approx 2r$) | mAP ≈ 75–79%, 7–7.6 GB VRAM |
-| Tiny parameter budget | `0–11` BitFit | mAP ≈ 76.6%, ~0.12% backbone params |
+**Full-fine-tuning reference.** The 88.0 / 94.4 result is a 60-epoch run whose optimizer, learning rate, weight decay, schedule, and batch size were **not retained**. It is not established that it used the PEFT AdamW recipe. [`configs/Market/vit_transreid_stride.yml`](configs/Market/vit_transreid_stride.yml) is the public 120-epoch SGD configuration and is a different recipe. See `configs/catalogue/market1501/full_ft_public_120epoch_sgd_NOTE.yml`.
 
 ---
 
-## 5. Setup
+## 3. Trainability (inspected implementations)
 
-### Installation
+Documented from the released code; do not “correct” trainability to match older README text.
+
+| Method | Backbone LayerNorm | BNNeck affine | Notes |
+|--------|--------------------|---------------|-------|
+| LoRA | frozen | scale and bias frozen | Only LoRA `A`/`B` (+ optional LoRA bias) and classifiers trainable |
+| Adapter | frozen | scale and bias frozen | Parallel bottleneck on `qkv,proj,fc1,fc2` |
+| LN-tuning | γ/β in window trainable | scale and bias frozen | Final backbone norm flag controlled by config |
+| BitFit | β in window trainable | biases trainable; scales frozen | Patch-embedding bias remains trainable in every window |
+| SSF | composed with SSF after LN | scales trainable; biases frozen | Patch-embedding SSF trainable in every window; JPM disabled in reported runs |
+
+In all cases BNNeck running statistics still update during training. JPM branches `b1`/`b2` stay frozen. With JPM enabled, backbone block 11 and the original final LayerNorm are **registered but not executed**; published parameter counts are registered counts that include those unused parameters.
+
+---
+
+## 4. Setup
 
 ```bash
 pip install -r requirements.txt
-# torch / torchvision / timm / yacs / opencv-python
+# torch / torchvision / timm / yacs / opencv-python (unpinned in this repo)
 ```
 
-See [`CUDA_SETUP_GUIDE.md`](CUDA_SETUP_GUIDE.md) for a step-by-step CUDA/PyTorch setup and `check_cuda.py` to verify the GPU is visible.
+Historical PyTorch / CUDA versions used for the manuscript runs were not recovered from environment files in this repository. For local verification of this integration, a CPU venv was exercised with **PyTorch 2.14.1** (macOS arm64). That is the current integration environment, not a claim about the historical training stack on the RTX 4000 Ada workstation.
 
-### Prepare Market-1501
-
-Download [Market-1501](https://drive.google.com/file/d/0B8-rUzbwVRk0c054eEozWG9COHM/view), unzip, and place it under `data/`:
-
-```
-data
-└── market1501
-    ├── bounding_box_train/
-    ├── bounding_box_test/
-    └── query/
-```
-
-Automated dataset helper scripts are provided:
-
-```bash
-python datasets/download_market1501.py
-```
-
-### Pretrained ViT backbone
-
-Download the ImageNet-pretrained [ViT-Base](https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-vitjx/jx_vit_base_p16_224-80ecf9dd.pth) and point `MODEL.PRETRAIN_PATH` in the config to it.
+Prepare Market-1501 under `./data/market1501/` (or let the optional downloader run when the training split is missing). Point `MODEL.PRETRAIN_PATH` at the ImageNet ViT-Base checkpoint [`jx_vit_base_p16_224-80ecf9dd.pth`](https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-vitjx/jx_vit_base_p16_224-80ecf9dd.pth).
 
 ---
 
-## 6. Running Experiments
+## 5. Running experiments
 
-Every PEFT run is driven by a single YAML configuration file.
-
-### Single Model Training
+### Catalogue rows (recommended)
 
 ```bash
-# LoRA — blocks 4–11, r=32, α=64 (best compromise)
-python train.py --config_file configs/Market/lora_blocks_4_11_r32.yml MODEL.DEVICE_ID "('0')"
+# Best observed full-depth LoRA (85.8 mAP)
+python train.py --config_file configs/catalogue/market1501/lora_0_11_r8_a16.yml
 
-# SSF — full depth (Case 2 official recipe)
-python train.py --config_file configs/Market/ssf_0_11_case2.yml MODEL.DEVICE_ID "('0')"
+# Best observed full-depth adapter (85.9 mAP)
+python train.py --config_file configs/catalogue/market1501/adapter_0_11_r16.yml
 
-# Bottleneck Adapters — full depth (r=16)
-python train.py --config_file configs/Market/adapter_blocks_0_11_r16.yml MODEL.DEVICE_ID "('0')"
+# LoRA 4–11, r=32, α=64 (83.2 mAP) — same settings as the historically misnamed
+# configs/Market/vit_transreid_stride_lora_blocks_6_11.yml
+python train.py --config_file configs/catalogue/market1501/lora_4_11_r32_a64.yml
 
-# Full fine-tuning baseline
-python train.py --config_file configs/Market/baselines/vit_transreid.yml MODEL.DEVICE_ID "('0')"
+# SSF Case 2, JPM off
+python train.py --config_file configs/catalogue/market1501/ssf_0_11_case2.yml
+
+# BitFit / LN-tuning
+python train.py --config_file configs/catalogue/market1501/bitfit_0_11.yml
+python train.py --config_file configs/catalogue/market1501/lntune_0_11.yml
 ```
 
-### Automated Suite Runners
+Evaluate:
 
 ```bash
-# Dry-run diagnostic check (CPU or GPU)
-python tools/check_peft.py --config_file configs/Market/adapter_blocks_0_11_r16.yml --cpu-only
-
-# Run full Lightweight PEFT Baselines suite (BitFit, LN-Tuning, Adapters)
-python tools/run_experiment4.py
-
-# Run Classification Control benchmark suite
-python tools/run_classification_control.py
-
+python test.py --config_file configs/catalogue/market1501/lora_0_11_r8_a16.yml \
+    TEST.WEIGHT ../logs/catalogue_lora_0_11_r8_a16/transformer_60.pth
 ```
 
-### Evaluation
-
-Adapter-only checkpoints are saved when `PEFT.SAVE_ADAPTER_ONLY: True`; they are loaded automatically on top of the frozen backbone at test time.
+### Legacy self-contained LoRA configs
 
 ```bash
-python test.py --config_file configs/Market/lora_blocks_4_11_r32.yml \
-    MODEL.DEVICE_ID "('0')" TEST.WEIGHT path/to/checkpoint.pth
+python train.py --config_file configs/Market/vit_transreid_stride_lora.yml
+# blocks 4–11, r=32, α=64 (filename is historical; see comment inside the file)
+python train.py --config_file configs/Market/vit_transreid_stride_lora_blocks_6_11.yml
 ```
 
-### Unit Testing
+### Diagnostics
 
 ```bash
-python -m pytest tests/
+python tools/check_peft.py --config_file configs/catalogue/market1501/adapter_0_11_r16.yml --cpu-only
+pytest tests/
 ```
+
+Exploratory classification-control and mini-dataset configs live under [`configs/exploratory/`](configs/exploratory/) and are **not** manuscript results.
 
 ---
 
-## 7. Config Reference
+## 6. PEFT config reference
 
 ```yaml
 PEFT:
-  METHOD: "lora" # "none" | "lora" | "ssf" | "bitfit" | "lntune" | "adapter"
-
+  METHOD: 'lora'   # none | lora | adapter | bitfit | lntune | ssf
   LORA:
-    R: 32 # rank r
-    ALPHA: 64 # scaling α (aim for α ≈ 2r)
-    DROPOUT: 0.05
-    TARGETS: ["qkv", "proj", "fc1", "fc2"] # ["qkv","proj"] = attention-only ablation
-    BLOCKS: [4, 5, 6, 7, 8, 9, 10, 11] # empty/omit = all 12 blocks
-
-  ADAPTER:
-    R: 16 # bottleneck rank r
+    R: 8
+    ALPHA: 16
     DROPOUT: 0.05
     TARGETS: ["qkv", "proj", "fc1", "fc2"]
-    BLOCKS: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    BLOCKS: []                 # empty = configured 0–11
+    TRAIN_HEAD: True
+    MERGE_AT_EVAL: False       # keep False during training; use export_merged_lora_copy for inference export
+    SAVE_ADAPTER_ONLY: True    # adapter export + prediction state; not a full resume checkpoint
 ```
 
 ---
 
-## 8. Citation
-
-If you use this repository or its findings, please cite our study and the original TransReID:
+## 7. Citation
 
 ```bibtex
 @article{naseer2025peft,
-  title   = {PEFT-on-ReID: Parameter-Efficient Fine-Tuning for Person Re-Identification on Vision Transformers},
-  author  = {Naseer, Huzaifa and Rehman, Tameema and Ashfaq, Anas and Syed, Farrukh Hasan},
+  title   = {Selecting Parameter-Efficient Fine-Tuning Configurations
+             for Transformer-Based Person Re-Identification},
+  author  = {Naseer, Huzaifa and Rehman, Tameema and Ashfaq, Anas
+             and Taaha, Muhammad and Syed, Farrukh Hasan},
   year    = {2025}
 }
 
@@ -232,6 +180,6 @@ If you use this repository or its findings, please cite our study and the origin
 
 ---
 
-## 9. Acknowledgement
+## 8. Acknowledgement
 
-Built on top of [TransReID](https://github.com/damo-cv/TransReID), which itself derives from [reid-strong-baseline](https://github.com/michuanhaohao/reid-strong-baseline) and [pytorch-image-models](https://github.com/rwightman/pytorch-image-models). The LoRA formulation follows Hu et al. (ICLR 2022), SSF follows Lian et al. (NeurIPS 2022), and BitFit follows Zaken et al. (ACL 2022).
+Built on [TransReID](https://github.com/damo-cv/TransReID). LoRA follows Hu et al. (ICLR 2022); SSF follows Lian et al. (NeurIPS 2022); bottleneck adapters follow Houlsby et al. (2019) / He et al. (2022); BitFit follows Ben Zaken et al. (2022); LayerNorm tuning follows Qi et al. (2022).

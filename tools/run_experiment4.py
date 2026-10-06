@@ -187,7 +187,8 @@ def run_one(label: str, config_rel: str, seed: int, epochs: int | None, workers:
         "seed": seed,
         "returncode": proc.returncode,
         "wall_seconds": round(wall, 1),
-        "peak_vram_gb": round(monitor.peak_vram_mib / 1024, 2),
+        # MiB / 1024 => binary gigabytes (GiB). Maximum sampled total GPU memory.
+        "peak_vram_gib": round(monitor.peak_vram_mib / 1024, 2),
         "peak_gpu_util": monitor.peak_util,
         **{"mAP": None, "R1": None, "param_ratio": None,
            "trainable_params": None, "total_params": None},
@@ -198,7 +199,7 @@ def run_one(label: str, config_rel: str, seed: int, epochs: int | None, workers:
 
     status = "OK" if proc.returncode == 0 else f"FAILED (rc={proc.returncode})"
     print(f"     [{label}] {status} in {wall:.0f}s | "
-          f"peak VRAM {entry['peak_vram_gb']} GB | peak GPU {entry['peak_gpu_util']}%")
+          f"peak VRAM {entry['peak_vram_gib']} GiB | peak GPU {entry['peak_gpu_util']}%")
     if proc.returncode != 0:
         print(f"     check log: {log_path}")
         if stop_on_error:
@@ -249,7 +250,7 @@ def main() -> int:
     for key, entry in progress.items():
         print(f"  {key:<22} rc={entry['returncode']}  "
               f"params={entry.get('param_ratio')}%  mAP={entry.get('mAP')}  R1={entry.get('R1')}  "
-              f"VRAM={entry.get('peak_vram_gb')}GB  {entry.get('wall_seconds')}s")
+              f"VRAM={entry.get('peak_vram_gib')}GiB  {entry.get('wall_seconds')}s")
     return 0
 
 

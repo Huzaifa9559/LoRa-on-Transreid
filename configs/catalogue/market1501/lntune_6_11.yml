@@ -1,0 +1,10 @@
+_BASE_: '../../base/market1501_transreid.yml'
+
+PEFT:
+  METHOD: 'lntune'
+  LNTUNE:
+    ENABLED: True
+    BLOCKS: [6, 7, 8, 9, 10, 11]
+    TRAIN_FINAL_NORM: True
+
+OUTPUT_DIR: '../logs/catalogue_lntune_6_11'

@@ -6,10 +6,12 @@
 
 import glob
 import re
+import urllib
+import zipfile
 
 import os.path as osp
 
-from .download_duke import ensure_dukemtmcreid
+from utils.iotools import mkdir_if_missing
 from .bases import BaseImageDataset
 
 
@@ -31,6 +33,7 @@ class DukeMTMCreID(BaseImageDataset):
     def __init__(self, root='', verbose=True, pid_begin=0, **kwargs):
         super(DukeMTMCreID, self).__init__()
         self.dataset_dir = osp.join(root, self.dataset_dir)
+        self.dataset_url = 'http://vision.cs.duke.edu/DukeMTMC/data/misc/DukeMTMC-reID.zip'
         self.train_dir = osp.join(self.dataset_dir, 'bounding_box_train')
         self.query_dir = osp.join(self.dataset_dir, 'query')
         self.gallery_dir = osp.join(self.dataset_dir, 'bounding_box_test')
@@ -55,10 +58,21 @@ class DukeMTMCreID(BaseImageDataset):
         self.num_gallery_pids, self.num_gallery_imgs, self.num_gallery_cams, self.num_gallery_vids = self.get_imagedata_info(self.gallery)
 
     def _download_data(self):
-        if osp.exists(self.train_dir):
+        if osp.exists(self.dataset_dir):
+            print("This dataset has been downloaded.")
             return
-        print("DukeMTMC-reID not found — downloading...")
-        ensure_dukemtmcreid(root=osp.dirname(self.dataset_dir) or '.')
+
+        print("Creating directory {}".format(self.dataset_dir))
+        mkdir_if_missing(self.dataset_dir)
+        fpath = osp.join(self.dataset_dir, osp.basename(self.dataset_url))
+
+        print("Downloading DukeMTMC-reID dataset")
+        urllib.request.urlretrieve(self.dataset_url, fpath)
+
+        print("Extracting files")
+        zip_ref = zipfile.ZipFile(fpath, 'r')
+        zip_ref.extractall(self.dataset_dir)
+        zip_ref.close()
 
     def _check_before_run(self):
         """Check if all files are available before going deeper"""

@@ -1,4 +1,4 @@
-_BASE_: '../base/market1501_transreid.yml'
+_BASE_: '../../base/market1501_transreid.yml'
 
 MODEL:
   JPM: False
@@ -11,6 +11,6 @@ PEFT:
     MERGE_ON_SAVE: False
     LR: 0.0
     FREEZE_BACKBONE: True
-    OPTIMIZER_CASE: 1
+    OPTIMIZER_CASE: 2
 
-OUTPUT_DIR: '../logs/market_vit_transreid_ssf_4_11_case1'
+OUTPUT_DIR: '../logs/catalogue_ssf_4_11_case2'

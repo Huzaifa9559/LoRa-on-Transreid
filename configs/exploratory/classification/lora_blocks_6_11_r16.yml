@@ -1,16 +1,16 @@
-_BASE_: '../base/classification_transreid.yml'
+_BASE_: '../classification_transreid.yml'
 
 PEFT:
   METHOD: 'lora'
   LORA:
-    R: 8
-    ALPHA: 16
+    R: 16
+    ALPHA: 32
     DROPOUT: 0.05
     TARGETS: ["qkv", "proj", "fc1", "fc2"]
     TRAIN_HEAD: True
     MERGE_AT_EVAL: False
     BIAS: "none"
     SAVE_ADAPTER_ONLY: True
-    BLOCKS: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    BLOCKS: [6, 7, 8, 9, 10, 11]
 
-OUTPUT_DIR: '../logs/classification_lora_0_11_r8'
+OUTPUT_DIR: '../logs/classification_lora_6_11_r16'

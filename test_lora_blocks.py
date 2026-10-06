@@ -10,29 +10,31 @@ import sys
 import os
 sys.path.append('.')
 
-from config import cfg
+from config import cfg, merge_config_file, normalize_peft_config
 from model import make_model
 from reid.peft.lora import LoRALinear
 
 def test_lora_block_specific():
     """Test that LoRA is applied only to the specified blocks"""
     
-    # Load a config with LoRA enabled for blocks 6-11
-    cfg.merge_from_file('configs/Market/vit_transreid_stride_lora_blocks_6_11.yml')
-    # Don't load pretrained weights for testing
+    # Historical filename specifies blocks 4–11; override to 6–11 for this check.
+    merge_config_file(cfg, 'configs/Market/vit_transreid_stride_lora_blocks_6_11.yml')
+    cfg.defrost()
     cfg.MODEL.PRETRAIN_CHOICE = 'none'
     cfg.MODEL.PRETRAIN_PATH = ''
-    cfg.MODEL.DEVICE = 'cuda'  # Use CUDA
+    cfg.MODEL.DEVICE = 'cpu'
     cfg.LORA.ENABLED = True
-    cfg.LORA.BLOCKS = [6, 7, 8, 9, 10, 11]  # Only apply to these blocks
+    cfg.LORA.BLOCKS = [6, 7, 8, 9, 10, 11]
     cfg.LORA.R = 8
     cfg.LORA.ALPHA = 16
     cfg.LORA.TARGETS = ["qkv", "proj", "fc1", "fc2"]
+    normalize_peft_config(cfg)
+    cfg.freeze()
     
     print("Configuration:")
-    print(f"  LoRA Enabled: {cfg.LORA.ENABLED}")
-    print(f"  LoRA Blocks: {cfg.LORA.BLOCKS}")
-    print(f"  LoRA Targets: {cfg.LORA.TARGETS}")
+    print(f"  PEFT Method: {cfg.PEFT.METHOD}")
+    print(f"  LoRA Blocks: {cfg.PEFT.LORA.BLOCKS}")
+    print(f"  LoRA Targets: {cfg.PEFT.LORA.TARGETS}")
     print(f"  Device: {cfg.MODEL.DEVICE}")
     print()
     
@@ -49,10 +51,11 @@ def test_lora_block_specific():
     dummy_input = torch.randn(1, 3, 256, 128).to(device)  # Batch size 1, 3 channels, 256x128 image
     print(f"Dummy input shape: {dummy_input.shape}, device: {dummy_input.device}")
     
+    cam = torch.zeros(1, dtype=torch.long, device=device)
     model.eval()
     with torch.no_grad():
         try:
-            output = model(dummy_input)
+            output = model(dummy_input, cam_label=cam, view_label=cam)
             print(f"✅ Forward pass successful!")
             print(f"Output shape: {output.shape if hasattr(output, 'shape') else 'Multiple outputs'}")
             print(f"Output device: {output.device if hasattr(output, 'device') else 'Multiple tensors'}")
@@ -68,7 +71,7 @@ def test_lora_block_specific():
     
     for name, module in model.named_modules():
         # Check for target modules in transformer blocks
-        if any(target in name for target in cfg.LORA.TARGETS):
+        if any(target in name for target in cfg.PEFT.LORA.TARGETS):
             all_target_modules.append(name)
             
             if isinstance(module, LoRALinear):
@@ -86,7 +89,7 @@ def test_lora_block_specific():
     print(f"  Modules with LoRA applied: {len(lora_modules)}")
     
     # Verify only blocks 6-11 have LoRA
-    expected_blocks = set(cfg.LORA.BLOCKS)
+    expected_blocks = set(cfg.PEFT.LORA.BLOCKS)
     actual_blocks = set()
     
     for name in lora_modules:

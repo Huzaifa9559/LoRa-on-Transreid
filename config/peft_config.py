@@ -67,12 +67,9 @@ def normalize_peft_config(cfg):
     if cfg.PEFT.METHOD == "none":
         if flag_method is not None:
             cfg.PEFT.METHOD = flag_method
-    elif flag_method is not None and flag_method != cfg.PEFT.METHOD:
-        raise ValueError(
-            f"Cannot enable more than one PEFT method at a time "
-            f"(METHOD={cfg.PEFT.METHOD}, flag={flag_method}). "
-            "Set PEFT.METHOD to one method only."
-        )
+    # When METHOD is already set, it is authoritative. Stale ENABLED flags left
+    # on the shared global CfgNode by a previous merge are cleared below; they
+    # must not raise, because yacs merge does not unset omitted keys.
 
     # Canonicalize: PEFT.METHOD is the single source of truth.
     method = cfg.PEFT.METHOD
